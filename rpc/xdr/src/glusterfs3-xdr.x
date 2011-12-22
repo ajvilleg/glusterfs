@@ -245,8 +245,6 @@ struct   gfs3_lookup_req {
         opaque   xdata<>; /* Extra data */
 } ;
 
-
-
  struct   gfs3_write_req {
         opaque gfid[16];
 	hyper  fd;
@@ -255,6 +253,27 @@ struct   gfs3_lookup_req {
         unsigned int flag;
         opaque   xdata<>; /* Extra data */
 };
+
+ /*
+  * Because write is a vector operation, trying to squeeze a variable-length
+  * field between the fixed header and the actual data is a bit of a nightmare.
+  * The vecsizer code will always put the fixed header into the vector element
+  * zero and the variable-sized part into (part of) vector element one, which
+  * means they have to be coalesced for XDR decode to work properly.  That
+  * means copying more than just dict_size, as well as more complexity, so
+  * forget it.  The fixed size here should be enough for the original
+  * vector-clock use case with up to three replicas, so we don't need to spend
+  * more time on it for now.
+  */
+struct gfs3_writexd_req {
+	opaque         gfid[16];
+	hyper          fd;
+	unsigned hyper offset;
+	unsigned int   size;
+	opaque         dict_data[128];
+	unsigned int   dict_size;
+};
+
  struct gfs3_write_rsp {
         int    op_ret;
         int    op_errno;
@@ -263,6 +282,14 @@ struct   gfs3_lookup_req {
         opaque   xdata<>; /* Extra data */
 } ;
 
+struct gfs3_writexd_rsp {
+	int            op_ret;
+	int            op_errno;
+	struct gf_iatt prestat;
+	struct gf_iatt poststat;
+	opaque         dict_data[128];
+	unsigned int   dict_size;
+};
 
  struct gfs3_statfs_req  {
         opaque gfid[16];

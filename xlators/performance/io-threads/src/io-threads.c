@@ -246,6 +246,7 @@ iot_schedule (call_frame_t *frame, xlator_t *this, call_stub_t *stub)
 
         case GF_FOP_READ:
         case GF_FOP_WRITE:
+	case GF_FOP_WRITEXD:
         case GF_FOP_FSYNC:
         case GF_FOP_TRUNCATE:
         case GF_FOP_FTRUNCATE:

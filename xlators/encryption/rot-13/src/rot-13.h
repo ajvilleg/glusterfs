@@ -25,9 +25,28 @@
 #include "config.h"
 #endif
 
+#include "uuid.h"
+
+#include <sqlite3.h>
+
+#define MAX_REPLICAS 3
+#define I_AM_CLIENT(p) (p->vc_index == 0)
+
 typedef struct {
-	gf_boolean_t encrypt_write;
-	gf_boolean_t decrypt_read;
+        uuid_t   node;  /* 16 bytes */
+        uint64_t clock; /*  8 bytes */
+} vc_element;           /* 24 bytes */
+
+typedef struct {
+        vc_element      elems[MAX_REPLICAS+1];  /*  96 bytes */
+} vector_clock;
+
+typedef struct {
+        uint32_t      vc_index;
+        vector_clock  vc;
+        call_pool_t   pool;
+        sqlite3      *db;
+        sqlite3_stmt *sql_log_cmd;
 } rot_13_private_t;
 
 #endif /* __ROT_13_H__ */

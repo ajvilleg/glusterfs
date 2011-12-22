@@ -751,6 +751,27 @@ xdr_gfs3_write_req (XDR *xdrs, gfs3_write_req *objp)
 }
 
 bool_t
+xdr_gfs3_writexd_req (XDR *xdrs, gfs3_writexd_req *objp)
+{
+	register int32_t *buf;
+        buf = NULL;
+
+	 if (!xdr_opaque (xdrs, objp->gfid, 16))
+		 return FALSE;
+	 if (!xdr_quad_t (xdrs, &objp->fd))
+		 return FALSE;
+	 if (!xdr_u_quad_t (xdrs, &objp->offset))
+		 return FALSE;
+	 if (!xdr_u_int (xdrs, &objp->size))
+		 return FALSE;
+	 if (!xdr_opaque (xdrs, objp->dict_data, 128))
+		 return FALSE;
+	 if (!xdr_u_int (xdrs, &objp->dict_size))
+		 return FALSE;
+	return TRUE;
+}
+
+bool_t
 xdr_gfs3_write_rsp (XDR *xdrs, gfs3_write_rsp *objp)
 {
 	register int32_t *buf;
@@ -765,6 +786,27 @@ xdr_gfs3_write_rsp (XDR *xdrs, gfs3_write_rsp *objp)
 	 if (!xdr_gf_iatt (xdrs, &objp->poststat))
 		 return FALSE;
 	 if (!xdr_bytes (xdrs, (char **)&objp->xdata.xdata_val, (u_int *) &objp->xdata.xdata_len, ~0))
+		 return FALSE;
+	return TRUE;
+}
+
+bool_t
+xdr_gfs3_writexd_rsp (XDR *xdrs, gfs3_writexd_rsp *objp)
+{
+	register int32_t *buf;
+        buf = NULL;
+
+	 if (!xdr_int (xdrs, &objp->op_ret))
+		 return FALSE;
+	 if (!xdr_int (xdrs, &objp->op_errno))
+		 return FALSE;
+	 if (!xdr_gf_iatt (xdrs, &objp->prestat))
+		 return FALSE;
+	 if (!xdr_gf_iatt (xdrs, &objp->poststat))
+		 return FALSE;
+	 if (!xdr_opaque (xdrs, objp->dict_data, 128))
+		 return FALSE;
+	 if (!xdr_u_int (xdrs, &objp->dict_size))
 		 return FALSE;
 	return TRUE;
 }

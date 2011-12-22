@@ -428,6 +428,16 @@ struct gfs3_write_req {
 };
 typedef struct gfs3_write_req gfs3_write_req;
 
+struct gfs3_writexd_req {
+	char gfid[16];
+	quad_t fd;
+	u_quad_t offset;
+	u_int size;
+	char dict_data[128];
+	u_int dict_size;
+};
+typedef struct gfs3_writexd_req gfs3_writexd_req;
+
 struct gfs3_write_rsp {
 	int op_ret;
 	int op_errno;
@@ -439,6 +449,16 @@ struct gfs3_write_rsp {
 	} xdata;
 };
 typedef struct gfs3_write_rsp gfs3_write_rsp;
+
+struct gfs3_writexd_rsp {
+	int op_ret;
+	int op_errno;
+	struct gf_iatt prestat;
+	struct gf_iatt poststat;
+	char dict_data[128];
+	u_int dict_size;
+};
+typedef struct gfs3_writexd_rsp gfs3_writexd_rsp;
 
 struct gfs3_statfs_req {
 	char gfid[16];
@@ -1134,7 +1154,9 @@ extern  bool_t xdr_gfs3_read_rsp (XDR *, gfs3_read_rsp*);
 extern  bool_t xdr_gfs3_lookup_req (XDR *, gfs3_lookup_req*);
 extern  bool_t xdr_gfs3_lookup_rsp (XDR *, gfs3_lookup_rsp*);
 extern  bool_t xdr_gfs3_write_req (XDR *, gfs3_write_req*);
+extern  bool_t xdr_gfs3_writexd_req (XDR *, gfs3_writexd_req*);
 extern  bool_t xdr_gfs3_write_rsp (XDR *, gfs3_write_rsp*);
+extern  bool_t xdr_gfs3_writexd_rsp (XDR *, gfs3_writexd_rsp*);
 extern  bool_t xdr_gfs3_statfs_req (XDR *, gfs3_statfs_req*);
 extern  bool_t xdr_gfs3_statfs_rsp (XDR *, gfs3_statfs_rsp*);
 extern  bool_t xdr_gfs3_lk_req (XDR *, gfs3_lk_req*);
@@ -1224,7 +1246,9 @@ extern bool_t xdr_gfs3_read_rsp ();
 extern bool_t xdr_gfs3_lookup_req ();
 extern bool_t xdr_gfs3_lookup_rsp ();
 extern bool_t xdr_gfs3_write_req ();
+extern bool_t xdr_gfs3_writexd_req ();
 extern bool_t xdr_gfs3_write_rsp ();
+extern bool_t xdr_gfs3_writexd_rsp ();
 extern bool_t xdr_gfs3_statfs_req ();
 extern bool_t xdr_gfs3_statfs_rsp ();
 extern bool_t xdr_gfs3_lk_req ();

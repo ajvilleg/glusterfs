@@ -277,6 +277,15 @@ typedef int32_t (*fop_writev_cbk_t) (call_frame_t *frame,
                                      struct iatt *prebuf,
                                      struct iatt *postbuf);
 
+typedef int32_t (*fop_writevxd_cbk_t) (call_frame_t *frame,
+                                     void *cookie,
+                                     xlator_t *this,
+                                     int32_t op_ret,
+                                     int32_t op_errno,
+                                     struct iatt *prebuf,
+                                     struct iatt *postbuf,
+				     dict_t *extra);
+
 typedef int32_t (*fop_flush_cbk_t) (call_frame_t *frame,
                                     void *cookie,
                                     xlator_t *this,
@@ -522,6 +531,16 @@ typedef int32_t (*fop_writev_t) (call_frame_t *frame,
                                  uint32_t flags,
                                  struct iobref *iobref);
 
+typedef int32_t (*fop_writevxd_t) (call_frame_t *frame,
+                                   xlator_t *this,
+                                   fd_t *fd,
+                                   struct iovec *vector,
+                                   int32_t count,
+                                   off_t offset,
+                                   uint32_t flags,
+                                   struct iobref *iobref,
+				   dict_t *dict);
+
 typedef int32_t (*fop_flush_t) (call_frame_t *frame,
                                 xlator_t *this,
                                 fd_t *fd);
@@ -666,6 +685,7 @@ struct xlator_fops {
         fop_open_t           open;
         fop_readv_t          readv;
         fop_writev_t         writev;
+        fop_writevxd_t       writevxd;
         fop_flush_t          flush;
         fop_fsync_t          fsync;
         fop_opendir_t        opendir;
@@ -710,6 +730,7 @@ struct xlator_fops {
         fop_open_cbk_t           open_cbk;
         fop_readv_cbk_t          readv_cbk;
         fop_writev_cbk_t         writev_cbk;
+        fop_writevxd_cbk_t       writevxd_cbk;
         fop_flush_cbk_t          flush_cbk;
         fop_fsync_cbk_t          fsync_cbk;
         fop_opendir_cbk_t        opendir_cbk;

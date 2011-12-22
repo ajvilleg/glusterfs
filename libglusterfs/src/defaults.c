@@ -215,6 +215,17 @@ default_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
 
 int32_t
+default_writevxd_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+		      int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
+		      struct iatt *postbuf, dict_t *extra)
+{
+        STACK_UNWIND_STRICT (writevxd, frame, op_ret, op_errno,
+			     prebuf, postbuf, extra);
+        return 0;
+}
+
+
+int32_t
 default_flush_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                    int32_t op_ret, int32_t op_errno)
 {
@@ -522,6 +533,17 @@ default_writev_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
         STACK_WIND (frame, default_writev_cbk, FIRST_CHILD(this),
                     FIRST_CHILD(this)->fops->writev, fd, vector, count, off,
                     flags, iobref);
+        return 0;
+}
+
+int32_t
+default_writevxd_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
+                         struct iovec *vector, int32_t count, off_t off,
+                         uint32_t flags, struct iobref *iobref, dict_t *dict)
+{
+        STACK_WIND (frame, default_writevxd_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->writevxd, fd, vector, count, off,
+                    flags, iobref, dict);
         return 0;
 }
 
@@ -904,6 +926,17 @@ default_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         STACK_WIND (frame, default_writev_cbk, FIRST_CHILD(this),
                     FIRST_CHILD(this)->fops->writev, fd, vector, count, off,
                     flags, iobref);
+        return 0;
+}
+
+int32_t
+default_writevxd (call_frame_t *frame, xlator_t *this, fd_t *fd,
+                  struct iovec *vector, int32_t count, off_t off,
+                  uint32_t flags, struct iobref *iobref, dict_t *dict)
+{
+        STACK_WIND (frame, default_writevxd_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->writevxd, fd, vector, count, off,
+                    flags, iobref, dict);
         return 0;
 }
 

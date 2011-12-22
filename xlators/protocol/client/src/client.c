@@ -886,7 +886,7 @@ client_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         args.flags  = flags;
         args.iobref = iobref;
 
-        proc = &conf->fops->proctable[GF_FOP_WRITE];
+	proc = &conf->fops->proctable[GF_FOP_WRITE];
         if (!proc) {
                 gf_log (this->name, GF_LOG_ERROR,
                         "rpc procedure not found for %s",
@@ -898,6 +898,46 @@ client_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
 out:
         if (ret)
                 STACK_UNWIND_STRICT (writev, frame, -1, ENOTCONN, NULL, NULL);
+
+	return 0;
+}
+
+
+int32_t
+client_writevxd (call_frame_t *frame, xlator_t *this, fd_t *fd,
+                 struct iovec *vector, int32_t count, off_t off,
+                 uint32_t flags, struct iobref *iobref, dict_t *dict)
+{
+        int          ret  = -1;
+        clnt_conf_t *conf = NULL;
+        rpc_clnt_procedure_t *proc = NULL;
+        clnt_args_t  args = {0,};
+
+        conf = this->private;
+        if (!conf || !conf->fops)
+                goto out;
+
+        args.fd     = fd;
+        args.vector = vector;
+        args.count  = count;
+        args.offset = off;
+        args.iobref = iobref;
+	args.dict = dict;
+
+	proc = &conf->fops->proctable[GF_FOP_WRITEXD];
+        if (!proc) {
+                gf_log (this->name, GF_LOG_ERROR,
+                        "rpc procedure not found for %s",
+                        gf_fop_list[GF_FOP_WRITEXD]);
+                goto out;
+        }
+        if (proc->fn)
+                ret = proc->fn (frame, this, &args);
+out:
+        if (ret) {
+                STACK_UNWIND_STRICT (writevxd, frame, -1, ENOTCONN,
+				     NULL, NULL, NULL);
+	}
 
 	return 0;
 }
@@ -2549,6 +2589,7 @@ struct xlator_fops fops = {
         .open        = client_open,
         .readv       = client_readv,
         .writev      = client_writev,
+	.writevxd    = client_writevxd,
         .statfs      = client_statfs,
         .flush       = client_flush,
         .fsync       = client_fsync,

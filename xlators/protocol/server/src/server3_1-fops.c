@@ -32,6 +32,9 @@
 #include "md5.h"
 #include "xdr-nfs3.h"
 
+#define SERVER3_1_VECWRITE_START 0
+#define SERVER3_1_VECWRITE_READINGHDR 1
+
 
 /* Callback function section */
 int
@@ -1191,6 +1194,65 @@ server_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_write_rsp);
+
+        return 0;
+}
+
+
+int
+server_writevxd_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+                     int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
+                     struct iatt *postbuf, dict_t *extra)
+{
+        gfs3_writexd_rsp  rsp   = {0,};
+        server_state_t   *state = NULL;
+        rpcsvc_request_t *req   = NULL;
+	int               ret = (-1);
+
+        req           = frame->local;
+
+        state = CALL_STATE(frame);
+        if (op_ret >= 0) {
+                gf_stat_from_iatt (&rsp.prestat, prebuf);
+                gf_stat_from_iatt (&rsp.poststat, postbuf);
+        } else {
+                gf_log (this->name, GF_LOG_INFO,
+                        "%"PRId64": WRITEV %"PRId64" (%s) ==> %"PRId32" (%s)",
+                        frame->root->unique, state->resolve.fd_no,
+                        state->fd ? uuid_utoa (state->fd->inode->gfid) : "--",
+			op_ret, strerror (op_errno));
+        }
+
+	/* Wow, dict_serialized_length barfs on an empty dictionary. */
+	if (extra && extra->count) {
+		rsp.dict_size = dict_serialized_length(extra);
+		if (rsp.dict_size > sizeof(rsp.dict_data)) {
+			rsp.dict_size = 0;
+			rsp.op_ret = -1;
+			rsp.op_errno = EINVAL;
+			goto unwind;
+		}
+
+		ret = dict_serialize(extra,rsp.dict_data);
+		if (ret < 0) {
+			gf_log (this->name, GF_LOG_WARNING,
+				"failed to get serialized dict");
+			rsp.dict_size = 0;
+			rsp.op_ret = -1;
+			rsp.op_errno = EINVAL;
+			goto unwind;
+		}
+	}
+	else {
+		rsp.dict_size = 0;
+	}
+
+        rsp.op_ret    = op_ret;
+        rsp.op_errno  = gf_errno_to_error (op_errno);
+
+unwind:
+        server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
+                             (xdrproc_t)xdr_gfs3_writexd_rsp);
 
         return 0;
 }
@@ -2393,8 +2455,32 @@ server_writev_resume (call_frame_t *frame, xlator_t *bound_xl)
 
         return 0;
 err:
+	dict_unref(state->dict);
         server_writev_cbk (frame, NULL, frame->this, state->resolve.op_ret,
-                           state->resolve.op_errno, NULL, NULL);
+			   state->resolve.op_errno, NULL, NULL);
+        return 0;
+}
+
+
+int
+server_writevxd_resume (call_frame_t *frame, xlator_t *bound_xl)
+{
+        server_state_t   *state = NULL;
+
+        state = CALL_STATE (frame);
+
+        if (state->resolve.op_ret != 0)
+                goto err;
+
+        STACK_WIND (frame, server_writevxd_cbk,
+                    bound_xl, bound_xl->fops->writevxd,
+                    state->fd, state->payload_vector, state->payload_count,
+                    state->offset, state->iobref, state->dict);
+
+        return 0;
+err:
+        server_writevxd_cbk (frame, NULL, frame->this, state->resolve.op_ret,
+                           state->resolve.op_errno, NULL, NULL, NULL);
         return 0;
 }
 
@@ -3021,9 +3107,6 @@ server_writev_vec (rpcsvc_request_t *req, struct iovec *payload,
         return server_writev (req);
 }
 
-#define SERVER3_1_VECWRITE_START 0
-#define SERVER3_1_VECWRITE_READINGHDR 1
-
 int
 server_writev_vecsizer (int state, ssize_t *readsize, char *addr)
 {
@@ -3046,6 +3129,107 @@ server_writev_vecsizer (int state, ssize_t *readsize, char *addr)
 }
 
 
+int
+server_writevxd (rpcsvc_request_t *req)
+{
+        server_state_t      *state  = NULL;
+        call_frame_t        *frame  = NULL;
+        gfs3_writexd_req     args   = {{0,},};
+        ssize_t              len    = 0;
+        int                  i      = 0;
+        int                  ret    = -1;
+
+        if (!req)
+                return ret;
+
+        len = xdr_to_generic (req->msg[0], &args, (xdrproc_t)xdr_gfs3_writexd_req);
+        if (len == 0) {
+                //failed to decode msg;
+                req->rpc_err = GARBAGE_ARGS;
+                goto out;
+        }
+
+        frame = get_frame_from_request (req);
+        if (!frame) {
+                // something wrong, mostly insufficient memory
+                req->rpc_err = GARBAGE_ARGS; /* TODO */
+                goto out;
+        }
+        frame->root->op = GF_FOP_WRITE;
+
+        state = CALL_STATE (frame);
+        if (!state->conn->bound_xl) {
+                /* auth failure, request on subvolume without setvolume */
+                req->rpc_err = GARBAGE_ARGS;
+                goto out;
+        }
+
+        state->resolve.type  = RESOLVE_MUST;
+        state->resolve.fd_no = args.fd;
+        state->offset        = args.offset;
+        state->iobref        = iobref_ref (req->iobref);
+	state->dict          = dict_new ();
+
+	ret = dict_unserialize (args.dict_data, args.dict_size, &state->dict);
+	if (ret < 0) {
+		gf_log ("server3_1", GF_LOG_ERROR,
+			"%"PRId64": failed to "
+			"unserialize request buffer to dictionary",
+			frame->root->unique);
+		goto out;
+	}
+
+        if (len < req->msg[0].iov_len) {
+                state->payload_vector[0].iov_base
+                        = (req->msg[0].iov_base + len);
+                state->payload_vector[0].iov_len
+                        = req->msg[0].iov_len - len;
+                state->payload_count = 1;
+        }
+
+        for (i = 1; i < req->count; i++) {
+                state->payload_vector[state->payload_count++]
+                        = req->msg[i];
+        }
+
+        for (i = 0; i < state->payload_count; i++) {
+                state->size += state->payload_vector[i].iov_len;
+        }
+
+        ret = 0;
+        resolve_and_resume (frame, server_writevxd_resume);
+out:
+        return ret;
+}
+
+
+int
+server_writevxd_vec (rpcsvc_request_t *req, struct iovec *payload,
+                   int payload_count, struct iobref *iobref)
+{
+        return server_writevxd (req);
+}
+
+int
+server_writevxd_vecsizer (int state, ssize_t *readsize, char *addr)
+{
+        int nextstate = 0;
+        gfs3_writexd_req    write_req              = {{0,},};
+
+        switch (state) {
+        case SERVER3_1_VECWRITE_START:
+                *readsize = xdr_sizeof ((xdrproc_t) xdr_gfs3_writexd_req, &write_req);
+                nextstate = SERVER3_1_VECWRITE_READINGHDR;
+                break;
+        case SERVER3_1_VECWRITE_READINGHDR:
+                *readsize = 0;
+                nextstate = SERVER3_1_VECWRITE_START;
+                break;
+        default:
+                gf_log ("server3_1", GF_LOG_ERROR, "wrong state: %d", state);
+        }
+        return nextstate;
+}
 int
 server_release (rpcsvc_request_t *req)
 {
@@ -4995,6 +5179,7 @@ rpcsvc_actor_t glusterfs3_1_fop_actors[] = {
         [GFS3_OP_RELEASE]     = { "RELEASE",    GFS3_OP_RELEASE, server_release, NULL, NULL, 0},
         [GFS3_OP_RELEASEDIR]  = { "RELEASEDIR", GFS3_OP_RELEASEDIR, server_releasedir, NULL, NULL, 0},
         [GFS3_OP_FREMOVEXATTR] = { "FREMOVEXATTR", GFS3_OP_FREMOVEXATTR, server_fremovexattr, NULL, NULL, 0},
+        [GFS3_OP_WRITEXD]     = { "WRITEXD",    GFS3_OP_WRITEXD, server_writevxd, server_writevxd_vec, server_writevxd_vecsizer },
 };
 
 

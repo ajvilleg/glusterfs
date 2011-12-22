@@ -673,7 +673,11 @@ client3_1_writev_cbk (struct rpc_req *req, struct iovec *iov, int count,
                 goto out;
         }
 
-        ret = xdr_to_generic (*iov, &rsp, (xdrproc_t)xdr_gfs3_truncate_rsp);
+	/*
+	 * Used to be xdr_gfs3_write_rsp here.  That would have led to very
+	 * unpleasant results if either structure ever changed.
+	 */
+        ret = xdr_to_generic (*iov, &rsp, (xdrproc_t)xdr_gfs3_write_rsp);
         if (ret < 0) {
                 gf_log (this->name, GF_LOG_ERROR, "XDR decoding failed");
                 rsp.op_ret   = -1;
@@ -694,6 +698,77 @@ out:
         STACK_UNWIND_STRICT (writev, frame, rsp.op_ret,
                              gf_error_to_errno (rsp.op_errno), &prestat,
                              &poststat);
+
+        return 0;
+}
+
+int
+client3_1_writevxd_cbk (struct rpc_req *req, struct iovec *iov, int count,
+			void *myframe)
+{
+	gfs3_writexd_rsp  rsp = {0,};
+	call_frame_t     *frame = NULL;
+	struct iatt       prestat  = {0,};
+	struct iatt       poststat = {0,};
+	int               ret = 0;
+	xlator_t         *this = NULL;
+	dict_t           *extra = NULL;
+
+        this = THIS;
+
+        frame = myframe;
+
+        if (-1 == req->rpc_status) {
+                rsp.op_ret   = -1;
+                rsp.op_errno = ENOTCONN;
+                goto out;
+        }
+
+        ret = xdr_to_generic (*iov, &rsp, (xdrproc_t)xdr_gfs3_writexd_rsp);
+        if (ret < 0) {
+                gf_log (this->name, GF_LOG_ERROR, "XDR decoding failed");
+                rsp.op_ret   = -1;
+                rsp.op_errno = EINVAL;
+                goto out;
+        }
+
+        if (-1 != rsp.op_ret) {
+                gf_stat_to_iatt (&rsp.prestat, &prestat);
+                gf_stat_to_iatt (&rsp.poststat, &poststat);
+        }
+
+	if (rsp.dict_size) {
+		extra = dict_new();
+		if (!extra) {
+			gf_log(this->name,GF_LOG_ERROR,
+			       "dict allocation failed");
+			rsp.op_ret = -1;
+			rsp.op_errno = ENOMEM;
+			goto out;
+		}
+
+		ret = dict_unserialize (rsp.dict_data, rsp.dict_size, &extra);
+		if (ret < 0) {
+			gf_log (this->name, GF_LOG_ERROR,
+				"dict unserialization failed");
+			rsp.op_ret = -1;
+			rsp.op_errno = EIO;
+			goto out;
+		}
+	}
+
+out:
+        if (rsp.op_ret == -1) {
+                gf_log (this->name, GF_LOG_WARNING,
+		        "remote operation failed: %s",
+                        strerror (gf_error_to_errno (rsp.op_errno)));
+        }
+        STACK_UNWIND_STRICT (writevxd, frame, rsp.op_ret,
+                             gf_error_to_errno (rsp.op_errno), &prestat,
+                             &poststat, extra);
+	if (extra) {
+		dict_unref(extra);
+	}
 
         return 0;
 }
@@ -3573,6 +3648,69 @@ unwind:
 
 
 int32_t
+client3_1_writevxd (call_frame_t *frame, xlator_t *this, void *data)
+{
+        clnt_args_t      *args     = NULL;
+        int64_t           remote_fd = -1;
+        clnt_conf_t      *conf     = NULL;
+        gfs3_writexd_req  req      = {{0,},};
+        int               op_errno = ESTALE;
+        int               ret      = 0;
+
+        if (!frame || !this || !data)
+                goto unwind;
+
+        args = data;
+        conf = this->private;
+
+        CLIENT_GET_REMOTE_FD(conf, args->fd, remote_fd, op_errno, unwind);
+
+        req.size   = args->size;
+        req.offset = args->offset;
+        req.fd     = remote_fd;
+
+	/*
+	 * Did you notice how dict_serialize doesn't even take a length
+	 * argument?  That means it *can't* check the buffer length, so
+	 * everyone who calls it must.
+	 */
+
+	if (args->dict && args->dict->count) {
+		req.dict_size = dict_serialized_length(args->dict);
+		if (req.dict_size > sizeof(req.dict_data)) {
+			op_errno = EINVAL;
+			goto unwind;
+		}
+
+		ret = dict_serialize(args->dict,req.dict_data);
+		if (ret < 0) {
+			gf_log (this->name, GF_LOG_WARNING,
+				"failed to get serialized dict");
+			op_errno = EINVAL;
+			goto unwind;
+		}
+	}
+	else {
+		req.dict_size = 0;
+	}
+
+        ret = client_submit_vec_request (this, &req, frame, conf->fops,
+					 GFS3_OP_WRITEXD,
+					 client3_1_writevxd_cbk, args->vector,
+					 args->count, args->iobref,
+					 (xdrproc_t)xdr_gfs3_writexd_req);
+        if (!ret) {
+		return 0;
+	}
+
+unwind:
+        gf_log (this->name, GF_LOG_WARNING, "failed to send the fop: %s", strerror (op_errno));
+        STACK_UNWIND_STRICT (writevxd, frame, -1, op_errno, NULL, NULL, NULL);
+        return 0;
+}
+
+
+int32_t
 client3_1_flush (call_frame_t *frame, xlator_t *this,
                  void *data)
 {
@@ -5209,6 +5347,7 @@ rpc_clnt_procedure_t clnt3_1_fop_actors[GF_FOP_MAXVALUE] = {
         [GF_FOP_OPEN]        = { "OPEN",        client3_1_open },
         [GF_FOP_READ]        = { "READ",        client3_1_readv },
         [GF_FOP_WRITE]       = { "WRITE",       client3_1_writev },
+        [GF_FOP_WRITEXD]     = { "WRITEXD",     client3_1_writevxd },
         [GF_FOP_STATFS]      = { "STATFS",      client3_1_statfs },
         [GF_FOP_FLUSH]       = { "FLUSH",       client3_1_flush },
         [GF_FOP_FSYNC]       = { "FSYNC",       client3_1_fsync },
@@ -5258,6 +5397,7 @@ char *clnt3_1_fop_names[GFS3_OP_MAXVALUE] = {
         [GFS3_OP_OPEN]        = "OPEN",
         [GFS3_OP_READ]        = "READ",
         [GFS3_OP_WRITE]       = "WRITE",
+        [GFS3_OP_WRITEXD]     = "WRITEXD",
         [GFS3_OP_STATFS]      = "STATFS",
         [GFS3_OP_FLUSH]       = "FLUSH",
         [GFS3_OP_FSYNC]       = "FSYNC",
