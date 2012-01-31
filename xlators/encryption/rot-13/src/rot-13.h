@@ -47,6 +47,7 @@ typedef struct {
         call_pool_t   pool;
         sqlite3      *db;
         sqlite3_stmt *sql_log_cmd;
+        gf_boolean_t  logging;
 } rot_13_private_t;
 
 #endif /* __ROT_13_H__ */

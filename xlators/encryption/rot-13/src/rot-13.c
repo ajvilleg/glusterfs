@@ -295,7 +295,7 @@ rot13_writevxd (call_frame_t *frame,
                 }
         }
 
-        if (!I_AM_CLIENT(priv)) {
+        if (!I_AM_CLIENT(priv) && priv->logging) {
                 rot13_log(this,priv,fd,offset,count,vc);
         }
 
@@ -417,6 +417,19 @@ init (xlator_t *this)
                 return -1;
         }
 
+        priv->logging = _gf_true;
+        data = dict_get (this->options, "logging");
+        if (data) {
+                if (gf_string2boolean(data->data,&priv->logging) == 0) {
+                        gf_log (this->name,GF_LOG_INFO,
+                                "logging is %s", priv->logging ? "ON" : "OFF");
+                }
+                else {
+                        gf_log (this->name,GF_LOG_WARNING,
+                                "invalid logging option %s", data->data);
+                }
+        }
+
         uuid_copy(priv->vc.elems[priv->vc_index].node,my_uuid);
         priv->vc.elems[priv->vc_index].clock = priv->vc_index * 1000;
 
@@ -486,6 +499,9 @@ struct volume_options options[] = {
         },
         { .key = {"uuid"},
           .type = GF_OPTION_TYPE_STR
+        },
+        { .key = {"logging"},
+          .type = GF_OPTION_TYPE_BOOL
         },
 	{ .key  = {NULL} },
 };
