@@ -3650,12 +3650,12 @@ unwind:
 int32_t
 client3_1_writevxd (call_frame_t *frame, xlator_t *this, void *data)
 {
-        clnt_args_t      *args     = NULL;
+        clnt_args_t      *args      = NULL;
         int64_t           remote_fd = -1;
-        clnt_conf_t      *conf     = NULL;
-        gfs3_writexd_req  req      = {{0,},};
-        int               op_errno = ESTALE;
-        int               ret      = 0;
+        clnt_conf_t      *conf      = NULL;
+        gfs3_writexd_req  req       = {{0,},};
+        int               op_errno  = ESTALE;
+        int               ret       = 0;
 
         if (!frame || !this || !data)
                 goto unwind;
