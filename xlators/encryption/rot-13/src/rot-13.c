@@ -28,6 +28,7 @@
 #include "glusterfs.h"
 #include "xlator.h"
 #include "logging.h"
+#include "defaults.h"
 
 #include "rot-13.h"
 
@@ -66,7 +67,7 @@ rot13_writev_cbk (call_frame_t *frame,
 
 int32_t
 rot13_release_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-                   int32_t op_ret, int32_t op_errno, struct iatt *buf)
+                   int32_t op_ret, int32_t op_errno)
 {
         gf_log(this->name,GF_LOG_DEBUG,"got to %s",__func__);
         STACK_DESTROY(frame->root);
@@ -117,8 +118,10 @@ rot13_writevxd_client_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
          */
         newframe = create_frame(this,&priv->pool);
         if (newframe) {
+                dict_ref(dict);
                 STACK_WIND (newframe, rot13_release_cbk, FIRST_CHILD(this),
-                            FIRST_CHILD(this)->fops->fstat, cookie);
+                            FIRST_CHILD(this)->fops->fsetxattr,
+                            cookie, dict, 0);
         }
         else {
                 gf_log(this->name,GF_LOG_ERROR,
@@ -150,7 +153,6 @@ rot13_writevxd_server_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 	int     ret = (-1);
 
         ++(priv->vc.elems[priv->vc_index].clock);
-        /* TBD: update per-client clock value */
 
 	extra = dict_new();
 	ret = dict_set_static_bin(extra,"vector-clock",
@@ -230,20 +232,20 @@ rot13_log (xlator_t *this, rot_13_private_t *priv,
 
         rc = sqlite3_bind_int(priv->sql_log_cmd,4,(int)vc->elems[1].clock);
         if (rc != SQLITE_OK) {
-                gf_log(this->name,GF_LOG_ERROR,"could not bind server vc");
+                gf_log(this->name,GF_LOG_ERROR,"could not bind server VC");
                 return;
         }
 
         rc = sqlite3_bind_int(priv->sql_log_cmd,5,(int)vc->elems[0].clock);
         if (rc != SQLITE_OK) {
-                gf_log(this->name,GF_LOG_ERROR,"could not bind vc3");
+                gf_log(this->name,GF_LOG_ERROR,"could not bind client VC");
                 return;
         }
 
         rc = sqlite3_bind_blob(priv->sql_log_cmd,6,vc->elems[0].node,
                                sizeof(uuid_t),SQLITE_STATIC);
         if (rc != SQLITE_OK) {
-                gf_log(this->name,GF_LOG_ERROR,"could not bind end");
+                gf_log(this->name,GF_LOG_ERROR,"could not bind client ID");
                 return;
         }
 
@@ -289,7 +291,11 @@ rot13_writevxd (call_frame_t *frame,
                        uuid_utoa(vc->elems[i].node), vc->elems[i].clock);
         }
 
-        for (i = 1; i <= MAX_REPLICAS; ++i) {
+        for (i = 0; i <= MAX_REPLICAS; ++i) {
+                if (i == priv->vc_index) {
+                        continue;
+                }
+                uuid_copy(priv->vc.elems[i].node,vc->elems[i].node);
                 if (vc->elems[i].clock > priv->vc.elems[i].clock) {
                         priv->vc.elems[i].clock = vc->elems[i].clock;
                 }
@@ -327,6 +333,64 @@ rot13_finodelk (call_frame_t *frame, xlator_t *this, const char *volume,
 {
         gf_log(this->name,GF_LOG_DEBUG,"stubbing out finodelk");
         STACK_UNWIND_STRICT (finodelk, frame, 0, 0);
+        return 0;
+}
+
+void
+rot13_retire (xlator_t *this, vector_clock *vc)
+{
+        int     rc              = 0;
+        int     n               = 0;
+        rot_13_private_t *priv  = this->private;
+
+        if (!priv->logging) {
+                return;
+        }
+
+        rc = sqlite3_bind_blob(priv->sql_retire_cmd,1,vc->elems[0].node,
+                               sizeof(uuid_t),SQLITE_STATIC);
+        if (rc != SQLITE_OK) {
+                gf_log(this->name,GF_LOG_ERROR,"could not bind client ID");
+                return;
+        }
+
+        rc = sqlite3_bind_int(priv->sql_retire_cmd,2,(int)vc->elems[0].clock);
+        if (rc != SQLITE_OK) {
+                gf_log(this->name,GF_LOG_ERROR,"could not bind client VC");
+                return;
+        }
+
+        rc = sqlite3_step(priv->sql_retire_cmd);
+        if (rc != SQLITE_DONE) {
+                gf_log(this->name,GF_LOG_ERROR,"DELETE failed");
+                return;
+        }
+
+        n = sqlite3_changes(priv->db);
+        if (n != 1) {
+                gf_log(this->name,GF_LOG_WARNING,"affected %d rows",n);
+        }
+
+        (void)sqlite3_reset(priv->sql_retire_cmd);
+        (void)sqlite3_clear_bindings(priv->sql_retire_cmd);
+}
+
+int32_t
+rot13_fsetxattr (call_frame_t *frame, xlator_t *this, fd_t *fd,
+                 dict_t *dict, int32_t flags)
+{
+        data_t *data = NULL;
+
+        data = dict_get(dict,"vector-clock");
+        if (data) {
+                gf_log(this->name,GF_LOG_DEBUG,"got vector-clock xattr");
+                rot13_retire(this,(vector_clock *)data->data);
+                STACK_UNWIND_STRICT (fsetxattr, frame, 0, 0);
+                return 0;
+        }
+
+        STACK_WIND (frame, default_fsetxattr_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->fsetxattr, fd, dict, flags);
         return 0;
 }
 
@@ -370,6 +434,14 @@ rot13_init_db (xlator_t *this, rot_13_private_t *priv)
                 -1, &priv->sql_log_cmd, NULL);
         if (rc != SQLITE_OK) {
                 gf_log(this->name,GF_LOG_ERROR,"could not create INSERT");
+                return;
+        }
+
+        rc = sqlite3_prepare_v2(priv->db,
+                "DELETE FROM timeline WHERE client_id = ? AND client_vc = ?",
+                -1, &priv->sql_retire_cmd, NULL);
+        if (rc != SQLITE_OK) {
+                gf_log(this->name,GF_LOG_ERROR,"could not create REMOVE");
                 return;
         }
 }
@@ -431,7 +503,7 @@ init (xlator_t *this)
         }
 
         uuid_copy(priv->vc.elems[priv->vc_index].node,my_uuid);
-        priv->vc.elems[priv->vc_index].clock = priv->vc_index * 1000;
+        priv->vc.elems[priv->vc_index].clock = (priv->vc_index + 1) * 1000;
 
         if (!I_AM_CLIENT(priv)) {
                 rot13_init_db(this,priv);
@@ -481,10 +553,11 @@ fini (xlator_t *this)
 }
 
 struct xlator_fops fops = {
-	.writev   = rot13_writev,
-	.writevxd = rot13_writevxd,
-        .fxattrop = rot13_fxattrop,
-        .finodelk = rot13_finodelk,
+	.writev    = rot13_writev,
+	.writevxd  = rot13_writevxd,
+        .fxattrop  = rot13_fxattrop,
+        .finodelk  = rot13_finodelk,
+        .fsetxattr = rot13_fsetxattr,
 };
 
 struct xlator_cbks cbks = {
