@@ -963,6 +963,46 @@ out:
 
 
 int32_t
+client_writev_vers (call_frame_t *frame, xlator_t *this, fd_t *fd,
+               struct iovec *vector, int32_t count, off_t off,
+               uint32_t flags, struct iobref *iobref, uint32_t version)
+{
+        int          ret  = -1;
+        clnt_conf_t *conf = NULL;
+        rpc_clnt_procedure_t *proc = NULL;
+        clnt_args_t  args = {0,};
+
+        conf = this->private;
+        if (!conf || !conf->fops)
+                goto out;
+
+        args.fd     = fd;
+        args.vector = vector;
+        args.count  = count;
+        args.offset = off;
+        args.flags  = flags;
+        args.iobref = iobref;
+        args.version = version;
+
+        proc = &conf->fops->proctable[GF_FOP_WRITE_VERS];
+        if (!proc) {
+                gf_log (this->name, GF_LOG_ERROR,
+                        "rpc procedure not found for %s",
+                        gf_fop_list[GF_FOP_WRITE]);
+                goto out;
+        }
+        if (proc->fn)
+                ret = proc->fn (frame, this, &args);
+out:
+        if (ret)
+                STACK_UNWIND_STRICT (writev_vers, frame, -1, ENOTCONN,
+                                     NULL, NULL, version);
+
+	return 0;
+}
+
+
+int32_t
 client_flush (call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *xdata)
 {
         int          ret  = -1;
@@ -2624,6 +2664,7 @@ struct xlator_fops fops = {
         .open        = client_open,
         .readv       = client_readv,
         .writev      = client_writev,
+        .writev_vers = client_writev_vers,
         .statfs      = client_statfs,
         .flush       = client_flush,
         .fsync       = client_fsync,

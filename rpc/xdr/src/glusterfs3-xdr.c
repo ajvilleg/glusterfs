@@ -31,7 +31,7 @@
  * It was generated using rpcgen.
  */
 
-#include "glusterfs3-xdr.h"
+#include "rpc/xdr/src/glusterfs3-xdr.h"
 
 bool_t
 xdr_gf_statfs (XDR *xdrs, gf_statfs *objp)
@@ -731,6 +731,57 @@ xdr_gfs3_write_req (XDR *xdrs, gfs3_write_req *objp)
 	register int32_t *buf;
         buf = NULL;
 
+
+	if (xdrs->x_op == XDR_ENCODE) {
+		 if (!xdr_opaque (xdrs, objp->gfid, 16))
+			 return FALSE;
+		 if (!xdr_quad_t (xdrs, &objp->fd))
+			 return FALSE;
+		 if (!xdr_u_quad_t (xdrs, &objp->offset))
+			 return FALSE;
+		buf = XDR_INLINE (xdrs, 3 * BYTES_PER_XDR_UNIT);
+		if (buf == NULL) {
+			 if (!xdr_u_int (xdrs, &objp->size))
+				 return FALSE;
+			 if (!xdr_u_int (xdrs, &objp->flag))
+				 return FALSE;
+			 if (!xdr_int (xdrs, &objp->vers))
+				 return FALSE;
+
+		} else {
+		IXDR_PUT_U_LONG(buf, objp->size);
+		IXDR_PUT_U_LONG(buf, objp->flag);
+		IXDR_PUT_LONG(buf, objp->vers);
+		}
+		 if (!xdr_bytes (xdrs, (char **)&objp->xdata.xdata_val, (u_int *) &objp->xdata.xdata_len, ~0))
+			 return FALSE;
+		return TRUE;
+	} else if (xdrs->x_op == XDR_DECODE) {
+		 if (!xdr_opaque (xdrs, objp->gfid, 16))
+			 return FALSE;
+		 if (!xdr_quad_t (xdrs, &objp->fd))
+			 return FALSE;
+		 if (!xdr_u_quad_t (xdrs, &objp->offset))
+			 return FALSE;
+		buf = XDR_INLINE (xdrs, 3 * BYTES_PER_XDR_UNIT);
+		if (buf == NULL) {
+			 if (!xdr_u_int (xdrs, &objp->size))
+				 return FALSE;
+			 if (!xdr_u_int (xdrs, &objp->flag))
+				 return FALSE;
+			 if (!xdr_int (xdrs, &objp->vers))
+				 return FALSE;
+
+		} else {
+		objp->size = IXDR_GET_U_LONG(buf);
+		objp->flag = IXDR_GET_U_LONG(buf);
+		objp->vers = IXDR_GET_LONG(buf);
+		}
+		 if (!xdr_bytes (xdrs, (char **)&objp->xdata.xdata_val, (u_int *) &objp->xdata.xdata_len, ~0))
+			 return FALSE;
+	 return TRUE;
+	}
+
 	 if (!xdr_opaque (xdrs, objp->gfid, 16))
 		 return FALSE;
 	 if (!xdr_quad_t (xdrs, &objp->fd))
@@ -740,6 +791,8 @@ xdr_gfs3_write_req (XDR *xdrs, gfs3_write_req *objp)
 	 if (!xdr_u_int (xdrs, &objp->size))
 		 return FALSE;
 	 if (!xdr_u_int (xdrs, &objp->flag))
+		 return FALSE;
+	 if (!xdr_int (xdrs, &objp->vers))
 		 return FALSE;
 	 if (!xdr_bytes (xdrs, (char **)&objp->xdata.xdata_val, (u_int *) &objp->xdata.xdata_len, ~0))
 		 return FALSE;
@@ -759,6 +812,8 @@ xdr_gfs3_write_rsp (XDR *xdrs, gfs3_write_rsp *objp)
 	 if (!xdr_gf_iatt (xdrs, &objp->prestat))
 		 return FALSE;
 	 if (!xdr_gf_iatt (xdrs, &objp->poststat))
+		 return FALSE;
+	 if (!xdr_int (xdrs, &objp->vers))
 		 return FALSE;
 	 if (!xdr_bytes (xdrs, (char **)&objp->xdata.xdata_val, (u_int *) &objp->xdata.xdata_len, ~0))
 		 return FALSE;

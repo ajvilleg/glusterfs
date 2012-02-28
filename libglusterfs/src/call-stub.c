@@ -1067,6 +1067,39 @@ out:
 
 
 call_stub_t *
+fop_writev_vers_stub (call_frame_t *frame,
+                 fop_writev_vers_t fn,
+                 fd_t *fd,
+                 struct iovec *vector,
+                 int32_t count,
+                 off_t off, uint32_t flags,
+                 struct iobref *iobref,
+                 uint32_t version)
+{
+        call_stub_t *stub = NULL;
+
+        GF_VALIDATE_OR_GOTO ("call-stub", frame, out);
+        GF_VALIDATE_OR_GOTO ("call-stub", vector, out);
+
+        stub = stub_new (frame, 1, GF_FOP_WRITE_VERS);
+        GF_VALIDATE_OR_GOTO ("call-stub", stub, out);
+
+        stub->args.writev.fn = (fop_writev_t)fn;
+        if (fd)
+                stub->args.writev.fd = fd_ref (fd);
+        stub->args.writev.vector = iov_dup (vector, count);
+        stub->args.writev.count  = count;
+        stub->args.writev.off    = off;
+        stub->args.writev.flags  = flags;
+        stub->args.writev.iobref = iobref_ref (iobref);
+        stub->args.writev.version = version;
+
+out:
+        return stub;
+}
+
+
+call_stub_t *
 fop_writev_cbk_stub (call_frame_t *frame,
                      fop_writev_cbk_t fn,
                      int32_t op_ret,
@@ -1078,7 +1111,7 @@ fop_writev_cbk_stub (call_frame_t *frame,
 
         GF_VALIDATE_OR_GOTO ("call-stub", frame, out);
 
-        stub = stub_new (frame, 0, GF_FOP_WRITE);
+        stub = stub_new (frame, 0, GF_FOP_WRITE_VERS);
         GF_VALIDATE_OR_GOTO ("call-stub", stub, out);
 
         stub->args.writev_cbk.fn = fn;
@@ -1090,7 +1123,39 @@ fop_writev_cbk_stub (call_frame_t *frame,
                 stub->args.writev_cbk.prebuf = *prebuf;
         if (xdata)
                 stub->xdata = dict_ref (xdata);
+out:
+        return stub;
+}
 
+
+
+call_stub_t *
+fop_writev_vers_cbk_stub (call_frame_t *frame,
+                     fop_writev_vers_cbk_t fn,
+                     int32_t op_ret,
+                     int32_t op_errno,
+                     struct iatt *prebuf,
+                     struct iatt *postbuf,
+                     dict_t *xdata,
+                     uint32_t version)
+{
+        call_stub_t *stub = NULL;
+
+        GF_VALIDATE_OR_GOTO ("call-stub", frame, out);
+
+        stub = stub_new (frame, 0, GF_FOP_WRITE);
+        GF_VALIDATE_OR_GOTO ("call-stub", stub, out);
+
+        stub->args.writev_cbk.fn = (fop_writev_cbk_t)fn;
+        stub->args.writev_cbk.op_ret = op_ret;
+        stub->args.writev_cbk.op_errno = op_errno;
+        if (op_ret >= 0)
+                stub->args.writev_cbk.postbuf = *postbuf;
+        if (prebuf)
+                stub->args.writev_cbk.prebuf = *prebuf;
+        if (xdata)
+                stub->xdata = dict_ref (xdata);
+        stub->args.writev_cbk.version = version;
 out:
         return stub;
 }
@@ -2511,6 +2576,21 @@ call_resume_wind (call_stub_t *stub)
                 break;
         }
 
+        case GF_FOP_WRITE_VERS:
+        {
+                ((fop_writev_vers_t)stub->args.writev.fn) (
+                                      stub->frame,
+                                      stub->frame->this,
+                                      stub->args.writev.fd,
+                                      stub->args.writev.vector,
+                                      stub->args.writev.count,
+                                      stub->args.writev.off,
+                                      stub->args.writev.flags,
+                                      stub->args.writev.iobref,
+                                      stub->args.writev.version);
+                break;
+        }
+
         case GF_FOP_STATFS:
         {
                 stub->args.statfs.fn (stub->frame,
@@ -3088,6 +3168,28 @@ call_resume_unwind (call_stub_t *stub)
                                                   stub->args.writev_cbk.op_errno,
                                                   &stub->args.writev_cbk.prebuf,
                                                   &stub->args.writev_cbk.postbuf, stub->xdata);
+                break;
+        }
+
+        case GF_FOP_WRITE_VERS:
+        {
+                if (!stub->args.writev_cbk.fn)
+                        STACK_UNWIND (stub->frame,
+                                      stub->args.writev_cbk.op_ret,
+                                      stub->args.writev_cbk.op_errno,
+                                      &stub->args.writev_cbk.prebuf,
+                                      &stub->args.writev_cbk.postbuf,
+                                      stub->args.writev_cbk.version);
+                else
+                        ((fop_writev_vers_cbk_t)stub->args.writev_cbk.fn) (
+                                                  stub->frame,
+                                                  stub->frame->cookie,
+                                                  stub->frame->this,
+                                                  stub->args.writev_cbk.op_ret,
+                                                  stub->args.writev_cbk.op_errno,
+                                                  &stub->args.writev_cbk.prebuf,
+                                                  &stub->args.writev_cbk.postbuf,
+                                                  stub->args.writev_cbk.version);
                 break;
         }
 
@@ -3682,6 +3784,7 @@ call_stub_destroy_wind (call_stub_t *stub)
         }
 
         case GF_FOP_WRITE:
+        case GF_FOP_WRITE_VERS:
         {
                 struct iobref *iobref = stub->args.writev.iobref;
                 if (stub->args.writev.fd)
@@ -3990,6 +4093,7 @@ call_stub_destroy_unwind (call_stub_t *stub)
         break;
 
         case GF_FOP_WRITE:
+        case GF_FOP_WRITE_VERS:
                 break;
 
         case GF_FOP_STATFS:

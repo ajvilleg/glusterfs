@@ -1416,6 +1416,40 @@ out:
 
 
 int
+server_writev_vers_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+                   int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
+                   struct iatt *postbuf, uint32 version)
+{
+        gfs3_write_rsp    rsp   = {0,};
+        server_state_t   *state = NULL;
+        rpcsvc_request_t *req   = NULL;
+
+        req           = frame->local;
+
+        rsp.op_ret    = op_ret;
+        rsp.op_errno  = gf_errno_to_error (op_errno);
+        rsp.vers      = version;
+
+        state = CALL_STATE(frame);
+        if (op_ret >= 0) {
+                gf_stat_from_iatt (&rsp.prestat, prebuf);
+                gf_stat_from_iatt (&rsp.poststat, postbuf);
+        } else {
+                gf_log (this->name, GF_LOG_INFO,
+                        "%"PRId64": WRITEV %"PRId64" (%s) ==> %"PRId32" (%s)",
+                        frame->root->unique, state->resolve.fd_no,
+                        state->fd ? uuid_utoa (state->fd->inode->gfid) : "--",
+                        op_ret, strerror (op_errno));
+        }
+
+        server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
+                             (xdrproc_t)xdr_gfs3_write_rsp);
+
+        return 0;
+}
+
+
+int
 server_readv_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                   int32_t op_ret, int32_t op_errno,
                   struct iovec *vector, int32_t count,
@@ -2696,6 +2730,29 @@ err:
 
 
 int
+server_writev_vers_resume (call_frame_t *frame, xlator_t *bound_xl)
+{
+        server_state_t   *state = NULL;
+
+        state = CALL_STATE (frame);
+
+        if (state->resolve.op_ret != 0)
+                goto err;
+
+        STACK_WIND (frame, server_writev_vers_cbk,
+                    bound_xl, bound_xl->fops->writev_vers,
+                    state->fd, state->payload_vector, state->payload_count,
+                    state->offset, state->flags, state->iobref, state->version);
+
+        return 0;
+err:
+        server_writev_vers_cbk (frame, NULL, frame->this, state->resolve.op_ret,
+                           state->resolve.op_errno, NULL, NULL, state->version);
+        return 0;
+}
+
+
+int
 server_readv_resume (call_frame_t *frame, xlator_t *bound_xl)
 {
         server_state_t    *state = NULL;
@@ -3390,10 +3447,84 @@ out:
 
 
 int
+server_writev_vers (rpcsvc_request_t *req)
+{
+        server_state_t      *state  = NULL;
+        call_frame_t        *frame  = NULL;
+        gfs3_write_req       args   = {{0,},};
+        ssize_t              len    = 0;
+        int                  i      = 0;
+        int                  ret    = -1;
+
+        if (!req)
+                return ret;
+
+        len = xdr_to_generic (req->msg[0], &args, (xdrproc_t)xdr_gfs3_write_req);
+        if (len == 0) {
+                //failed to decode msg;
+                req->rpc_err = GARBAGE_ARGS;
+                goto out;
+        }
+
+        frame = get_frame_from_request (req);
+        if (!frame) {
+                // something wrong, mostly insufficient memory
+                req->rpc_err = GARBAGE_ARGS; /* TODO */
+                goto out;
+        }
+        frame->root->op = GF_FOP_WRITE;
+
+        state = CALL_STATE (frame);
+        if (!state->conn->bound_xl) {
+                /* auth failure, request on subvolume without setvolume */
+                req->rpc_err = GARBAGE_ARGS;
+                goto out;
+        }
+
+        state->resolve.type  = RESOLVE_MUST;
+        state->resolve.fd_no = args.fd;
+        state->offset        = args.offset;
+        state->flags         = args.flag;
+        state->iobref        = iobref_ref (req->iobref);
+        state->version       = args.vers;
+        memcpy (state->resolve.gfid, args.gfid, 16);
+
+        if (len < req->msg[0].iov_len) {
+                state->payload_vector[0].iov_base
+                        = (req->msg[0].iov_base + len);
+                state->payload_vector[0].iov_len
+                        = req->msg[0].iov_len - len;
+                state->payload_count = 1;
+        }
+
+        for (i = 1; i < req->count; i++) {
+                state->payload_vector[state->payload_count++]
+                        = req->msg[i];
+        }
+
+        for (i = 0; i < state->payload_count; i++) {
+                state->size += state->payload_vector[i].iov_len;
+        }
+
+        ret = 0;
+        resolve_and_resume (frame, server_writev_vers_resume);
+out:
+        return ret;
+}
+
+
+int
 server_writev_vec (rpcsvc_request_t *req, struct iovec *payload,
                    int payload_count, struct iobref *iobref)
 {
         return server_writev (req);
+}
+
+int
+server_writev_vers_vec (rpcsvc_request_t *req, struct iovec *payload,
+                   int payload_count, struct iobref *iobref)
+{
+        return server_writev_vers (req);
 }
 
 #define SERVER3_1_VECWRITE_START 0
@@ -5630,6 +5761,7 @@ rpcsvc_actor_t glusterfs3_1_fop_actors[] = {
         [GFS3_OP_OPEN]        = { "OPEN",       GFS3_OP_OPEN, server_open, NULL, NULL, 0},
         [GFS3_OP_READ]        = { "READ",       GFS3_OP_READ, server_readv, NULL, NULL, 0},
         [GFS3_OP_WRITE]       = { "WRITE",      GFS3_OP_WRITE, server_writev, server_writev_vec, server_writev_vecsizer, 0},
+        [GFS3_OP_WRITE_VERS]  = { "WRITE_VERS", GFS3_OP_WRITE_VERS, server_writev_vers, server_writev_vers_vec, server_writev_vecsizer, 0},
         [GFS3_OP_STATFS]      = { "STATFS",     GFS3_OP_STATFS, server_statfs, NULL, NULL, 0},
         [GFS3_OP_FLUSH]       = { "FLUSH",      GFS3_OP_FLUSH, server_flush, NULL, NULL, 0},
         [GFS3_OP_FSYNC]       = { "FSYNC",      GFS3_OP_FSYNC, server_fsync, NULL, NULL, 0},

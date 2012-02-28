@@ -142,6 +142,16 @@ int32_t default_writev (call_frame_t *frame,
                         uint32_t flags,
                         struct iobref *iobref, dict_t *xdata);
 
+int32_t default_writev_vers (call_frame_t *frame,
+                        xlator_t *this,
+                        fd_t *fd,
+                        struct iovec *vector,
+                        int32_t count,
+                        off_t offset,
+                        uint32_t flags,
+                        struct iobref *iobref,
+                        uint32_t version);
+
 int32_t default_flush (call_frame_t *frame,
                        xlator_t *this,
                        fd_t *fd, dict_t *xdata);
@@ -347,6 +357,15 @@ int32_t default_writev_resume (call_frame_t *frame,
                                int32_t count,
                                off_t offset, uint32_t flags,
                                struct iobref *iobref, dict_t *xdata);
+
+int32_t default_writev_vers_resume (call_frame_t *frame,
+                               xlator_t *this,
+                               fd_t *fd,
+                               struct iovec *vector,
+                               int32_t count,
+                               off_t offset, uint32_t flags,
+                               struct iobref *iobref,
+                               uint32_t version);
 
 int32_t default_flush_resume (call_frame_t *frame,
                        xlator_t *this,
@@ -558,6 +577,12 @@ int32_t
 default_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                     int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
                     struct iatt *postbuf, dict_t *xdata);
+
+
+int32_t
+default_writev_vers_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+                    int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
+                    struct iatt *postbuf, uint32_t version);
 
 
 int32_t

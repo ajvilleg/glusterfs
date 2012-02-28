@@ -194,9 +194,9 @@ typedef struct client_args {
         gf_xattrop_flags_t  optype;
         int32_t             valid;
         int32_t             len;
-
         mode_t              umask;
         dict_t             *xdata;
+        uint32_t            version;
 } clnt_args_t;
 
 typedef ssize_t (*gfs_serialize_t) (struct iovec outmsg, void *args);

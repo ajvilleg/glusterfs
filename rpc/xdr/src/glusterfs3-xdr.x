@@ -251,6 +251,7 @@ struct   gfs3_lookup_req {
 	unsigned hyper offset;
 	unsigned int size;
         unsigned int flag;
+        int vers;
         opaque   xdata<>; /* Extra data */
 };
  struct gfs3_write_rsp {
@@ -258,6 +259,7 @@ struct   gfs3_lookup_req {
         int    op_errno;
 	struct gf_iatt prestat;
         struct gf_iatt poststat;
+        int vers;
         opaque   xdata<>; /* Extra data */
 } ;
 

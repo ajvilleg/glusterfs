@@ -288,12 +288,14 @@ typedef struct {
 			off_t off;
                         uint32_t flags;
 			struct iobref *iobref;
+                        uint32_t version;
 		} writev;
 		struct {
 			fop_writev_cbk_t fn;
 			int32_t op_ret, op_errno;
                         struct iatt prebuf;
 			struct iatt postbuf;
+                        uint32_t version;
 		} writev_cbk;
 
 		/* flush */
@@ -844,12 +846,31 @@ fop_writev_stub (call_frame_t *frame,
                  struct iobref *iobref, dict_t *xdata);
 
 call_stub_t *
+fop_writev_vers_stub (call_frame_t *frame,
+		 fop_writev_vers_t fn,
+		 fd_t *fd,
+		 struct iovec *vector,
+		 int32_t count,
+		 off_t off, uint32_t flags,
+                 struct iobref *iobref,
+                 uint32_t version);
+
+call_stub_t *
 fop_writev_cbk_stub (call_frame_t *frame,
 		     fop_writev_cbk_t fn,
 		     int32_t op_ret,
 		     int32_t op_errno,
                      struct iatt *prebuf,
                      struct iatt *postbuf, dict_t *xdata);
+
+call_stub_t *
+fop_writev_vers_cbk_stub (call_frame_t *frame,
+		     fop_writev_vers_cbk_t fn,
+		     int32_t op_ret,
+		     int32_t op_errno,
+                     struct iatt *prebuf,
+                     struct iatt *postbuf,
+                     uint32_t version);
 
 call_stub_t *
 fop_flush_stub (call_frame_t *frame,

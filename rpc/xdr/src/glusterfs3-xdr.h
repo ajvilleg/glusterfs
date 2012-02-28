@@ -404,6 +404,7 @@ struct gfs3_write_req {
 	u_quad_t offset;
 	u_int size;
 	u_int flag;
+	int vers;
 	struct {
 		u_int xdata_len;
 		char *xdata_val;
@@ -416,6 +417,7 @@ struct gfs3_write_rsp {
 	int op_errno;
 	struct gf_iatt prestat;
 	struct gf_iatt poststat;
+	int vers;
 	struct {
 		u_int xdata_len;
 		char *xdata_val;
