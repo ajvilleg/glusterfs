@@ -57,11 +57,10 @@ rot13_writev_cbk (call_frame_t *frame,
                   int32_t op_ret,
                   int32_t op_errno,
                   struct iatt *prebuf,
-		  struct iatt *postbuf,
-                  uint32_t flags)
+		  struct iatt *postbuf)
 {
 	STACK_UNWIND_STRICT (writev, frame, op_ret, op_errno,
-                             prebuf, postbuf, flags);
+                             prebuf, postbuf);
 	return 0;
 }
 
@@ -82,7 +81,7 @@ int32_t
 rot13_writevxd_client_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 			   int32_t op_ret, int32_t op_errno,
 			   struct iatt *prebuf, struct iatt *postbuf,
-			   uint32_t flags, dict_t *dict)
+			   dict_t *dict)
 {
 	rot_13_private_t *priv = (rot_13_private_t *)this->private;
         data_t *data = NULL;
@@ -145,8 +144,7 @@ err:
 int32_t
 rot13_writevxd_server_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 			   int32_t op_ret, int32_t op_errno,
-			   struct iatt *prebuf, struct iatt *postbuf,
-                           uint32_t flags)
+			   struct iatt *prebuf, struct iatt *postbuf)
 {
 	rot_13_private_t *priv = (rot_13_private_t *)this->private;
 	dict_t *extra = NULL;

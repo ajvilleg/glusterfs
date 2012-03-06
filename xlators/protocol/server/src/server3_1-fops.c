@@ -2475,7 +2475,7 @@ server_writevxd_resume (call_frame_t *frame, xlator_t *bound_xl)
         STACK_WIND (frame, server_writevxd_cbk,
                     bound_xl, bound_xl->fops->writevxd,
                     state->fd, state->payload_vector, state->payload_count,
-                    state->offset, state->iobref, state->dict);
+                    state->offset, state->flags, state->iobref, state->dict);
 
         return 0;
 err:
@@ -3167,8 +3167,10 @@ server_writevxd (rpcsvc_request_t *req)
         state->resolve.type  = RESOLVE_MUST;
         state->resolve.fd_no = args.fd;
         state->offset        = args.offset;
+        state->flags         = args.flag;
         state->iobref        = iobref_ref (req->iobref);
 	state->dict          = dict_new ();
+        memcpy (state->resolve.gfid, args.gfid, 16);
 
 	ret = dict_unserialize (args.dict_data, args.dict_size, &state->dict);
 	if (ret < 0) {

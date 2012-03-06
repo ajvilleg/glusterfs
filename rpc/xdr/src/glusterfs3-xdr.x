@@ -270,6 +270,7 @@ struct gfs3_writexd_req {
 	hyper          fd;
 	unsigned hyper offset;
 	unsigned int   size;
+        unsigned int   flag;
 	opaque         dict_data[128];
 	unsigned int   dict_size;
 };

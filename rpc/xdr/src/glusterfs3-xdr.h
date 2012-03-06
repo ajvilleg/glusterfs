@@ -433,6 +433,7 @@ struct gfs3_writexd_req {
 	quad_t fd;
 	u_quad_t offset;
 	u_int size;
+	u_int flag;
 	char dict_data[128];
 	u_int dict_size;
 };

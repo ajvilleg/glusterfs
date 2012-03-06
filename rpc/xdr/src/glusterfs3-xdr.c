@@ -31,7 +31,7 @@
  * It was generated using rpcgen.
  */
 
-#include "glusterfs3-xdr.h"
+#include "rpc/xdr/src/glusterfs3-xdr.h"
 
 bool_t
 xdr_gf_statfs (XDR *xdrs, gf_statfs *objp)
@@ -763,6 +763,8 @@ xdr_gfs3_writexd_req (XDR *xdrs, gfs3_writexd_req *objp)
 	 if (!xdr_u_quad_t (xdrs, &objp->offset))
 		 return FALSE;
 	 if (!xdr_u_int (xdrs, &objp->size))
+		 return FALSE;
+	 if (!xdr_u_int (xdrs, &objp->flag))
 		 return FALSE;
 	 if (!xdr_opaque (xdrs, objp->dict_data, 128))
 		 return FALSE;
