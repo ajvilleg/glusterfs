@@ -129,7 +129,7 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"cluster.quorum-type",                  "cluster/replicate",  "quorum-type", NULL, NO_DOC, 0},
         {"cluster.quorum-count",                 "cluster/replicate",  "quorum-count", NULL, NO_DOC, 0},
         {"cluster.afr-fast-path",                "cluster/replicate",  "fast-path", NULL, NO_DOC, 0},
-
+        {"cluster.hsrepl",                       "cluster/replicate",  "!hsrepl", NULL, NO_DOC, 0},
 
         {"cluster.stripe-block-size",            "cluster/stripe",     "block-size", NULL, DOC, 0},
 
@@ -1702,6 +1702,19 @@ server_graph_builder (volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
                 if (ret)
                         return -1;
 
+                ret = glusterd_volinfo_get_boolean (volinfo, "cluster.hsrepl");
+                if (ret > 0) {
+                        xl = volgen_graph_add (graph, "features/helper",
+                                               volname);
+                        if (!xl) {
+                                return -1;
+                        }
+                        ret = check_and_add_debug_xl (graph, set_dict, volname,
+                                                      "helper");
+                        if (ret) {
+                                return -1;
+                        }
+                }
         }
 
         xl = volgen_graph_add (graph, "features/marker", volname);
@@ -2208,6 +2221,15 @@ volgen_graph_build_clusters (volgen_graph_t *graph,
         xlator_t        *trav = NULL;
         char            *volname = NULL;
         int             ret     = -1;
+        gf_boolean_t    use_hsrepl = _gf_false;
+        int             k = 0;
+
+        if (!strcmp(xl_type,"cluster/replicate")) {
+                ret = glusterd_volinfo_get_boolean (volinfo, "cluster.hsrepl");
+                if (ret > 0) {
+                        use_hsrepl = _gf_true;
+                }
+        }
 
         if (child_count == 0)
                 goto out;
@@ -2235,6 +2257,26 @@ volgen_graph_build_clusters (volgen_graph_t *graph,
                 i++;
         }
 
+        if ((j >= 1) && use_hsrepl) {
+                trav = first_of (graph);
+                for (k = 1; k < j; ++k) {
+                        trav = trav->next;
+                }
+                for (k = 0; k < j; ++k) {
+                        xl = volgen_graph_add_nolink (graph, "features/hsrepl",
+                                                      "%s-hsrepl-%d",
+                                                      volname, k);
+                        if (!xl) {
+                                ret = -1;
+                                goto out;
+                        }
+                        ret = volgen_xlator_link(xl,trav);
+                        if (ret) {
+                                goto out;
+                        }
+                        trav = trav->prev;
+                }
+        }
         ret = j;
 out:
         return ret;
