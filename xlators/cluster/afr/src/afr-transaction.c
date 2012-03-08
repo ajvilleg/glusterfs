@@ -591,7 +591,7 @@ afr_changelog_post_op (call_frame_t *frame, xlator_t *this)
 
                         LOCK (&local->fd->lock);
                         {
-                                piggyback = 0;
+                                piggyback = priv->fast_path;
                                 if (fdctx->pre_op_piggyback[i]) {
                                         fdctx->pre_op_piggyback[i]--;
                                         piggyback = 1;
@@ -850,7 +850,7 @@ afr_changelog_pre_op (call_frame_t *frame, xlator_t *this)
 
                         LOCK (&local->fd->lock);
                         {
-                                piggyback = 0;
+                                piggyback = priv->fast_path;
                                 if (fdctx->pre_op_done[i]) {
                                         fdctx->pre_op_piggyback[i]++;
                                         piggyback = 1;

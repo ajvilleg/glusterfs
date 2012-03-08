@@ -163,6 +163,7 @@ typedef struct _afr_private {
         char                   vol_uuid[UUID_SIZE + 1];
         int32_t                *last_event;
         afr_self_heald_t       shd;
+        gf_boolean_t           fast_path;
 } afr_private_t;
 
 typedef struct {

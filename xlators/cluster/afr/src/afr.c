@@ -174,6 +174,12 @@ reconfigure (xlator_t *this, dict_t *options)
                           uint32, out);
         fix_quorum_options(this,priv,qtype);
 
+        GF_OPTION_RECONF ("fast-path", priv->fast_path, options, bool, out);
+        if (priv->fast_path) {
+                /* Fast path doesn't work without eager locking. */
+                priv->eager_lock = _gf_true;
+        }
+
         ret = 0;
 out:
         return ret;
@@ -299,6 +305,12 @@ init (xlator_t *this)
         GF_OPTION_INIT ("quorum-type", qtype, str, out);
         GF_OPTION_INIT ("quorum-count", priv->quorum_count, uint32, out);
         fix_quorum_options(this,priv,qtype);
+
+        GF_OPTION_INIT ("fast-path", priv->fast_path, bool, out);
+        if (priv->fast_path) {
+                /* Fast path doesn't work without eager locking. */
+                priv->eager_lock = _gf_true;
+        }
 
         priv->wait_count = 1;
 
@@ -606,5 +618,10 @@ struct volume_options options[] = {
                          "this many bricks or present.  Other quorum types "
                          "will OVERWRITE this value.",
         },
+        { .key = {"fast-path"},
+          .type = GF_OPTION_TYPE_BOOL,
+          .default_value = "off",
+          .description = "Turn off locking and xattr updates on writes, *for "
+                         "performance testing only*."},
         { .key  = {NULL} },
 };
