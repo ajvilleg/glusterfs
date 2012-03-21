@@ -33,17 +33,27 @@
 
 #include "helper.h"
 
-#define PARTNER_XATTR "trusted.hsrepl.partner-xattr"
 #define SAFETY_MSG(reason)                                              \
         gf_log (this->name, GF_LOG_DEBUG,                               \
                 "failing future I/O to avoid data corruption (%s)",     \
                 reason);
 
+enum {
+        CHANGELOG_DATA=0,
+        CHANGELOG_METADATA,
+        CHANGELOG_ENTRY,
+        CHANGELOG_SIZE
+};
+
+char *SELF_XATTR        = "trusted.hsrepl.self-xattr";
+char *PARTNER_XATTR     = "trusted.hsrepl.partner-xattr";
+
 dict_t *
 get_pending_dict (xlator_t *this, uint32_t bump)
 {
 	dict_t           *dict = NULL;
-	int32_t          *value = NULL;
+	int32_t          *value1 = NULL;
+	int32_t          *value2 = NULL;
         helper_private_t *priv = this->private;
 
 	dict = dict_new();
@@ -52,22 +62,36 @@ get_pending_dict (xlator_t *this, uint32_t bump)
                 return NULL;
 	}
 
-        value = GF_CALLOC(3,sizeof(*value),gf_by_mt_int32_t);
-        if (!value) {
+        value1 = GF_CALLOC(CHANGELOG_SIZE,sizeof(*value1),gf_by_mt_int32_t);
+        if (!value1) {
                 gf_log (this->name, GF_LOG_WARNING, "failed to allocate value");
                 goto free_dict;
         }
-        /* Amazingly, there's no constant for this. */
-        value[0] = htonl(bump);
-        if (dict_set_dynptr(dict,priv->partner_xattr,value,
-                            3*sizeof(*value)) < 0) {
+        value1[CHANGELOG_DATA] = htonl(bump);
+        if (dict_set_dynptr(dict,priv->partner_xattr,value1,
+                            CHANGELOG_SIZE*sizeof(*value1)) < 0) {
                 gf_log (this->name, GF_LOG_WARNING, "failed to set up dict");
-                goto free_value;
+                goto free_value1;
         }
+
+        value2 = GF_CALLOC(CHANGELOG_SIZE,sizeof(*value2),gf_by_mt_int32_t);
+        if (!value2) {
+                gf_log (this->name, GF_LOG_WARNING, "failed to allocate value");
+                goto free_value1;
+        }
+        value2[CHANGELOG_DATA] = htonl(bump);
+        if (dict_set_dynptr(dict,priv->self_xattr,value2,
+                            CHANGELOG_SIZE*sizeof(*value2)) < 0) {
+                gf_log (this->name, GF_LOG_WARNING, "failed to set up dict");
+                goto free_value2;
+        }
+
         return dict;
 
-free_value:
-        GF_FREE(value);
+free_value2:
+        GF_FREE(value2);
+free_value1:
+        GF_FREE(value1);
 free_dict:
 	dict_unref(dict);
         return NULL;
@@ -186,7 +210,7 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         helper_ctx_t     *ctx_ptr = NULL;
         helper_private_t *priv = this->private;
 
-        if (!priv->partner_xattr) {
+        if (!priv->self_xattr || !priv->partner_xattr) {
                 op_errno = ESRCH;
                 goto err;
         }
@@ -260,8 +284,22 @@ int32_t
 helper_setxattr (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
                  int32_t flags)
 {
+        char                    *self = NULL;
         char                    *partner = NULL;
         helper_private_t        *priv = this->private;
+
+        if (dict_get_str(dict,SELF_XATTR,&self) == 0) {
+                gf_log (this->name, GF_LOG_DEBUG,
+                        "setting self to %s", self);
+                if (priv->self_xattr) {
+                        GF_FREE(priv->self_xattr);
+                        priv->self_xattr = NULL;
+                }
+                if (gf_asprintf(&priv->self_xattr,"trusted.afr.%s",
+                                self) < 0) {
+                        SAFETY_MSG("format failed");
+                }
+        }
 
         if (dict_get_str(dict,PARTNER_XATTR,&partner) == 0) {
                 gf_log (this->name, GF_LOG_DEBUG,
@@ -286,6 +324,7 @@ helper_get_partner_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                         int32_t op_ret, int32_t op_errno, dict_t *dict)
 {
         helper_private_t        *priv = this->private;
+        char                    *self = NULL;
         char                    *partner = NULL;
 
         STACK_DESTROY(frame->root);
@@ -295,8 +334,21 @@ helper_get_partner_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto err;
         }
 
+        if (dict_get_str(dict,SELF_XATTR,&self) != 0) {
+                SAFETY_MSG("self missing in dict");
+                goto err;
+        }
+
+        if (gf_asprintf(&priv->self_xattr,"trusted.afr.%s", self) < 0) {
+                SAFETY_MSG("format failed");
+                goto err;
+        }
+
+        gf_log (this->name, GF_LOG_DEBUG,
+                "self-xattr is %s", priv->self_xattr);
+
         if (dict_get_str(dict,PARTNER_XATTR,&partner) != 0) {
-                SAFETY_MSG("item missing in dict");
+                SAFETY_MSG("partner missing in dict");
                 goto err;
         }
 
@@ -306,7 +358,7 @@ helper_get_partner_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         }
 
         gf_log (this->name, GF_LOG_DEBUG,
-                "partner-name is %s", priv->partner_xattr);
+                "partner-xattr is %s", priv->partner_xattr);
 err:
         return 0;
 }
@@ -346,6 +398,7 @@ int32_t
 init (xlator_t *this)
 {
 	helper_private_t *priv = NULL;
+        char             *self = NULL;
         char             *partner = NULL;
 
 	if (!this->children || this->children->next) {
@@ -387,6 +440,11 @@ init (xlator_t *this)
 
 	this->private = priv;
 
+        if (dict_get_str(this->options,SELF_XATTR,&self) == 0) {
+                (void)gf_asprintf(&priv->self_xattr,
+                                  "trusted.afr.%s", self);
+        }
+
         if (dict_get_str(this->options,PARTNER_XATTR,&partner) == 0) {
                 (void)gf_asprintf(&priv->partner_xattr,
                                   "trusted.afr.%s", partner);
@@ -416,6 +474,7 @@ fini (xlator_t *this)
         }
         this->private = NULL;
 
+        GF_FREE(priv->self_xattr);
         GF_FREE(priv->partner_xattr);
 	GF_FREE(priv);
 
@@ -431,6 +490,9 @@ struct xlator_cbks cbks = {
 };
 
 struct volume_options options[] = {
+        { .key = {"self-xattr"},
+          .type = GF_OPTION_TYPE_STR
+        },
         { .key = {"partner-xattr"},
           .type = GF_OPTION_TYPE_STR
         },

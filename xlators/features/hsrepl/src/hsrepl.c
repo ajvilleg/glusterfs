@@ -33,7 +33,15 @@
 
 #include "hsrepl.h"
 
-#define PARTNER_XATTR "trusted.hsrepl.partner-xattr"
+enum {
+        CHANGELOG_DATA=0,
+        CHANGELOG_METADATA,
+        CHANGELOG_ENTRY,
+        CHANGELOG_SIZE
+};
+
+char *SELF_XATTR        = "trusted.hsrepl.self-xattr";
+char *PARTNER_XATTR     = "trusted.hsrepl.partner-xattr";
 
 dict_t *
 get_pending_dict (xlator_t *this, uint32_t *incrs, gf_boolean_t *up,
@@ -54,7 +62,7 @@ get_pending_dict (xlator_t *this, uint32_t *incrs, gf_boolean_t *up,
 
         afr = this->children->xlator;
 	for (trav = afr->children; trav; trav = trav->next, ++i) {
-                if ((i == dest) || !up[i]) {
+                if (!up[i]) {
                         continue;
                 }
 
@@ -63,7 +71,8 @@ get_pending_dict (xlator_t *this, uint32_t *incrs, gf_boolean_t *up,
 				"failed to allocate key");
 			goto free_dict;
 		}
-		value = GF_CALLOC(3,sizeof(*value),gf_hsrepl_mt_int32_t);
+		value = GF_CALLOC(CHANGELOG_SIZE,sizeof(*value),
+                                  gf_hsrepl_mt_int32_t);
 		if (!value) {
 			gf_log (this->name, GF_LOG_WARNING,
 				"failed to allocate value");
@@ -73,9 +82,9 @@ get_pending_dict (xlator_t *this, uint32_t *incrs, gf_boolean_t *up,
                         gf_log (this->name, GF_LOG_DEBUG, "%s -= %u for %u",
                                 key, incrs[dest], dest);
                 }
-                /* Amazingly, there's no constant for this. */
-                value[0] = htonl(-incrs[dest]);
-		if (dict_set_dynptr(dict,key,value,3*sizeof(*value)) < 0) {
+                value[CHANGELOG_DATA] = htonl(-incrs[dest]);
+		if (dict_set_dynptr(dict,key,value,
+                                    CHANGELOG_SIZE*sizeof(*value)) < 0) {
 			gf_log (this->name, GF_LOG_WARNING,
 				"failed to set up dict");
 			goto free_value;
@@ -370,6 +379,7 @@ hsrepl_notify_partner (xlator_t *this, xlator_t *child1)
         xlator_t                *child2 = NULL;
         loc_t                    tmploc = {0,};
         call_frame_t            *newframe = NULL;
+        char                    *the_xattr = NULL;
 
         dict = dict_new();
         if (!dict) {
@@ -379,33 +389,31 @@ hsrepl_notify_partner (xlator_t *this, xlator_t *child1)
 
         for (trav = this->children->xlator->children; trav; trav = trav->next) {
                 child2 = trav->xlator;
-                if (child2 == child1) {
-                        continue;
-                }
 
-                if (dict_set_str(dict,PARTNER_XATTR,child2->name) != 0) {
+                the_xattr = (child2 == child1) ? SELF_XATTR : PARTNER_XATTR;
+                if (dict_set_str(dict,the_xattr,child2->name) != 0) {
                         gf_log (this->name, GF_LOG_ERROR,
                                 "could not create dict entry");
                         continue;
                 }
-
-                newframe = create_frame(this,&priv->pool);
-                if (!newframe) {
-                        gf_log (this->name,GF_LOG_ERROR,
-                                "could not create notify frame");
-                        continue;
-                }
-
-                /* This is sufficient to identify the root gfid. */
-                tmploc.gfid[15] = 1;
-
-                STACK_WIND_COOKIE (newframe, hsrepl_np_cbk, child1,
-                                   child1, child1->fops->setxattr,
-                                   &tmploc, dict, 0);
-                /* TBD: support multiple partners */
-                return;
-
         }
+
+        newframe = create_frame(this,&priv->pool);
+        if (!newframe) {
+                gf_log (this->name,GF_LOG_ERROR,
+                        "could not create notify frame");
+                goto err;
+        }
+
+        /* This is sufficient to identify the root gfid. */
+        tmploc.gfid[15] = 1;
+
+        STACK_WIND_COOKIE (newframe, hsrepl_np_cbk, child1,
+                           child1, child1->fops->setxattr,
+                           &tmploc, dict, 0);
+
+        /* TBD: support multiple partners */
+        return;
 
 err:
         gf_log (this->name, GF_LOG_WARNING,
@@ -471,25 +479,6 @@ hsrepl_notify (xlator_t *this, int32_t event, void *data, ...)
         return 0;
 }
 
-gf_boolean_t
-hsrepl_link_partners (xlator_t *this, xlator_t *afr)
-{
-        xlator_list_t   *kid1 = NULL;
-        xlator_list_t   *kid2 = NULL;
-
-        for (kid1 = afr->children; kid1; kid1 = kid1->next) {
-                for (kid2 = afr->children; kid2; kid2 = kid2->next) {
-                        if (kid2 == kid1) {
-                                continue;
-                        }
-                        gf_log (this->name, GF_LOG_DEBUG, "tell %s about %s",
-                                kid1->xlator->name, kid2->xlator->name);
-                }
-        }
-
-        return _gf_true;
-}
-
 int32_t
 init (xlator_t *this)
 {
@@ -551,8 +540,6 @@ init (xlator_t *this)
          */
         priv->real_notify = tgt_xl->notify;
         tgt_xl->notify = hsrepl_notify;
-
-        hsrepl_link_partners(this,tgt_xl);
 
 	gf_log (this->name, GF_LOG_DEBUG, "hsrepl xlator loaded");
 	this->private = priv;

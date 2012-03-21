@@ -31,6 +31,7 @@
 #define CAST2PTR(x) ((void *)(long)(x))
 
 typedef struct {
+        char            *self_xattr;
         char            *partner_xattr;
         call_pool_t      pool;
 } helper_private_t;
