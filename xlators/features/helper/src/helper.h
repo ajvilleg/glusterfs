@@ -39,6 +39,7 @@ typedef struct {
 typedef struct {
         uint32_t         version;
         void            *trans;
+        uint32_t         locks;
 } helper_ctx_t;
 
 typedef struct {

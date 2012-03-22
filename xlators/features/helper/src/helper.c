@@ -217,7 +217,7 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
 
         if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
                 ctx_ptr = CAST2PTR(ctx_int);
-                if (version != ctx_ptr->version) {
+                if ((version != ctx_ptr->version) || ctx_ptr->locks) {
                         gf_log (this->name, GF_LOG_DEBUG,
                                 "received %u != stored %u",
                                 version, ctx_ptr->version);
@@ -318,6 +318,67 @@ helper_setxattr (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
                     FIRST_CHILD(this)->fops->setxattr, loc, dict, flags);
         return 0;
 }
+
+int32_t
+helper_truncate (call_frame_t *frame, xlator_t *this, loc_t *loc, off_t offset)
+{
+        inode_t         *inode = loc->inode;
+        uint64_t         ctx_int = 0;
+        helper_ctx_t    *ctx_ptr = NULL;
+
+        if (inode) {
+                if (inode_ctx_get(inode,this,&ctx_int) == 0) {
+                        ctx_ptr = CAST2PTR(ctx_int);
+                        ++(ctx_ptr->version);
+                }
+        }
+
+        STACK_WIND (frame, default_truncate_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->truncate, loc, offset);
+        return 0;
+}
+
+int32_t
+helper_ftruncate (call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset)
+{
+        uint64_t          ctx_int = 0;
+        helper_ctx_t     *ctx_ptr = NULL;
+
+        if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
+                ctx_ptr = CAST2PTR(ctx_int);
+                ++(ctx_ptr->version);
+        }
+
+        STACK_WIND (frame, default_ftruncate_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->ftruncate, fd, offset);
+        return 0;
+}
+
+int32_t
+helper_finodelk (call_frame_t *frame, xlator_t *this, const char *volume,
+                 fd_t *fd, int32_t cmd, struct gf_flock *lock)
+{
+        uint64_t          ctx_int = 0;
+        helper_ctx_t     *ctx_ptr = NULL;
+
+        if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
+                ctx_ptr = CAST2PTR(ctx_int);
+                if (lock->l_type == F_UNLCK) {
+                        if (--(ctx_ptr->locks) == 0) {
+                                ++(ctx_ptr->version);
+                        }
+                }
+                else {
+                        ++(ctx_ptr->locks);
+                }
+        }
+
+        STACK_WIND (frame, default_finodelk_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->finodelk,
+                    volume, fd, cmd, lock);
+        return 0;
+}
+
 
 int32_t
 helper_get_partner_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
@@ -484,6 +545,9 @@ fini (xlator_t *this)
 struct xlator_fops fops = {
 	.writev_vers    = helper_writev,
         .setxattr       = helper_setxattr,
+        .truncate       = helper_truncate,
+        .ftruncate      = helper_ftruncate,
+        .finodelk       = helper_finodelk
 };
 
 struct xlator_cbks cbks = {
