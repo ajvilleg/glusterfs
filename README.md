@@ -17,16 +17,8 @@ majority of cases, writes are asynchronous and this isn't needed.  However,
 there are some particularly demanding and important cases - e.g. hosting
 virtual-machine images or applications with embedded database functionality -
 which do expect synchronous behavior and can benefit from lower-latency
-replication.  There are several known limitations and issues.
-
-* The code currently only works for two-way replication.
-
-* Ftruncate is not handled, and should be.
-
-* We need to do xattr updates on each replica for itself, not just for others.
-
-* Interaction with self-heal is incomplete.  Self-heal will work in general,
-  but if done concurrently with other writes could end up incomplete.
+replication.  The only major limitation right now is that the code only works
+for two-way replication.
 
 If you're feeling *very* adventurous, the "cluster.hsrepl" volume option will
 take care of inserting the hsrepl and helper translators.  I welcome feedback
