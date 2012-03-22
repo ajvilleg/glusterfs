@@ -30,35 +30,42 @@
 #define CAST2INT(x) ((uint64_t)(long)(x))
 #define CAST2PTR(x) ((void *)(long)(x))
 
-typedef struct {
-        gf_lock_t               lock;
-        call_pool_t             pool;
-        event_notify_fn_t       real_notify;
-        uint16_t                up_count;
-        gf_boolean_t            up[2];
+typedef struct _hsrepl_private {
+        gf_lock_t                lock;
+        call_pool_t              pool;
+        event_notify_fn_t        real_notify;
+        uint16_t                 up_count;
+        gf_boolean_t             up[2];
+        pthread_t                worker;
+        pthread_mutex_t          qlock;
+        pthread_cond_t           cond;
+        struct _hsrepl_local    *qhead;
+        struct _hsrepl_local    *qtail;
 } hsrepl_private_t;
 
 typedef struct {
         uint32_t         versions[2];
 } hsrepl_ctx_t;
 
-typedef struct {
-        uint16_t         calls;
-        uint16_t         errors;
-        uint16_t         conflicts;
-        fd_t            *fd;
-        struct iovec     vector[10];
-        int32_t          count;
-        off_t            off;
-        uint32_t         flags;
-        struct iobref   *iobref;
-        hsrepl_ctx_t    *ctx;
-        uint32_t         incrs[2];
-        uint32_t         good_op_ret;
-        uint32_t         good_op_errno;
-        struct iatt      good_prebuf;
-        struct iatt      good_postbuf;
-        uint16_t         up_children;
+typedef struct _hsrepl_local {
+        uint16_t                 calls;
+        uint16_t                 errors;
+        uint16_t                 conflicts;
+        fd_t                    *fd;
+        struct iovec             vector[10];
+        int32_t                  count;
+        off_t                    off;
+        uint32_t                 flags;
+        struct iobref           *iobref;
+        hsrepl_ctx_t            *ctx;
+        uint32_t                 incrs[2];
+        uint32_t                 good_op_ret;
+        uint32_t                 good_op_errno;
+        struct iatt              good_prebuf;
+        struct iatt              good_postbuf;
+        uint16_t                 up_children;
+        call_frame_t            *frame;
+        struct _hsrepl_local    *next;
 } hsrepl_local_t;
 
 enum gf_hsrepl_mem_types_ {

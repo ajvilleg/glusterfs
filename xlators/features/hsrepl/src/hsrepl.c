@@ -43,6 +43,10 @@ enum {
 char *SELF_XATTR        = "trusted.hsrepl.self-xattr";
 char *PARTNER_XATTR     = "trusted.hsrepl.partner-xattr";
 
+/* Forward declarations for use by fop functions/callbacks. */
+gf_boolean_t
+hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx);
+
 dict_t *
 get_pending_dict (xlator_t *this, uint32_t *incrs, gf_boolean_t *up,
                   uint8_t dest)
@@ -171,33 +175,19 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         }
 
         if (local->conflicts) {
-                gf_log (this->name, GF_LOG_DEBUG, "retrying wrong version");
-                LOCK(&priv->lock);
-                local->calls = priv->up_count;
-                memcpy(up_copy,priv->up,sizeof(up_copy));
-                UNLOCK(&priv->lock);
-                if (local->calls) {
-                        local->errors = 0;
-                        local->conflicts = 0;
-                        trav = this->children->xlator->children;
-                        for (i = 0; i < 2; ++i) {
-                                if (!up_copy[i]) {
-                                        continue;
-                                }
-                                gf_log (this->name, GF_LOG_DEBUG,
-                                        "re-sending version %u to %u",
-                                        ctx->versions[i], i);
-                                /* TBD: use a queue+thread to avoid recursion */
-                                STACK_WIND_COOKIE(frame,hsrepl_writev_cbk,
-                                        CAST2PTR(i), trav->xlator,
-                                        trav->xlator->fops->writev_vers,
-                                        local->fd, local->vector, local->count,
-                                        local->off, local->flags, local->iobref,
-                                        ctx->versions[i]);
-                                trav = trav->next;
-                        }
-                        return 0;
+                gf_log (this->name, GF_LOG_DEBUG, "queuing wrong version");
+                (void)pthread_mutex_lock(&priv->qlock);
+                local->next = NULL;
+                if (priv->qtail) {
+                        priv->qtail->next = local;
                 }
+                else {
+                        priv->qhead = local;
+                }
+                priv->qtail = local;
+                (void)pthread_cond_signal(&priv->cond);
+                (void)pthread_mutex_unlock(&priv->qlock);
+                return 0;
         }
 
         iobref_unref(local->iobref);
@@ -214,6 +204,7 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (!newframe) {
                 gf_log(this->name,GF_LOG_ERROR,
                        "could not create release frame");
+                op_errno = ENOMEM;
                 goto err;
         }
 
@@ -254,7 +245,7 @@ out:
 
 err:
         fd_unref(local->fd);
-        STACK_UNWIND_STRICT(writev, frame, -1, ENOMEM, NULL, NULL);
+        STACK_UNWIND_STRICT(writev, frame, -1, op_errno, NULL, NULL);
         return 0;
 }
 
@@ -264,18 +255,16 @@ hsrepl_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                uint32_t flags, struct iobref *iobref)
 {
         hsrepl_local_t   *local  = NULL;
-        xlator_list_t    *trav   = NULL;
         uint8_t           i      = 0;
         uint64_t          ctx_int = 0;
         hsrepl_ctx_t     *ctx_ptr = NULL;
         uint32_t          op_errno = ENOMEM;
-        gf_boolean_t      up_copy[2] = { _gf_false, };
-        hsrepl_private_t *priv = this->private;
 
         local = mem_get0(this->local_pool);
         if (!local) {
                 goto err;
         }
+        local->frame = frame;
 
         if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
                 ctx_ptr = CAST2PTR(ctx_int);
@@ -306,35 +295,11 @@ hsrepl_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         local->off = off;
         local->flags = flags;
         local->iobref = iobref_ref(iobref);
-        local->good_op_ret = -1;
-        local->good_op_errno = EINVAL;
         frame->local = local;
 
-        LOCK(&priv->lock);
-        local->calls = priv->up_count;
-        memcpy(up_copy,priv->up,sizeof(up_copy));
-        UNLOCK(&priv->lock);
-        if (!local->calls) {
+        if (!hsrepl_writev_continue(frame,this,ctx_ptr)) {
                 op_errno = ENOTCONN;
                 goto free_local;
-        }
-        if (local->calls != 2) {
-                gf_log (this->name, GF_LOG_DEBUG,
-                        "only sending to %u subvols", local->calls);
-        }
-
-        trav = this->children->xlator->children;
-        for (i = 0; i < 2; ++i, trav = trav->next) {
-                if (!up_copy[i]) {
-                        continue;
-                }
-                gf_log (this->name, GF_LOG_DEBUG,
-                        "sending version %u to %u",
-                        ctx_ptr->versions[i], i);
-                STACK_WIND_COOKIE(frame,hsrepl_writev_cbk,CAST2PTR(i),
-                        trav->xlator, trav->xlator->fops->writev_vers,
-                        fd, vector, count, off, flags, iobref,
-                        ctx_ptr->versions[i]);
         }
 
         return 0;
@@ -343,11 +308,51 @@ free_ctx:
         GF_FREE(ctx_ptr);
 free_local:
         mem_put(local);
-        fd_unref(fd);
-        iobref_unref(iobref);
 err:
-        STACK_UNWIND_STRICT(writev, frame, -1, ENOMEM, NULL, NULL);
+        STACK_UNWIND_STRICT(writev, frame, -1, op_errno, NULL, NULL);
         return 0;
+}
+
+gf_boolean_t
+hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx)
+{
+        hsrepl_local_t          *local          = frame->local;
+        hsrepl_private_t        *priv           = this->private;
+        gf_boolean_t             up_copy[2]     = { _gf_false, };
+        xlator_list_t           *trav           = NULL;
+        uint8_t                  i              = 0;
+
+        LOCK(&priv->lock);
+        local->calls = priv->up_count;
+        memcpy(up_copy,priv->up,sizeof(up_copy));
+        UNLOCK(&priv->lock);
+
+        if (!local->calls) {
+                return _gf_false;
+        }
+
+        local->good_op_ret = -1;
+        local->good_op_errno = EINVAL;
+        local->errors = 0;
+        local->conflicts = 0;
+
+        trav = this->children->xlator->children;
+        for (i = 0; i < 2; ++i, trav = trav->next) {
+                if (!up_copy[i]) {
+                        continue;
+                }
+                gf_log (this->name, GF_LOG_DEBUG,
+                        "sending version %u to %u", ctx->versions[i], i);
+                /* TBD: use a queue+thread to avoid recursion */
+                STACK_WIND_COOKIE(frame,hsrepl_writev_cbk,
+                        CAST2PTR(i), trav->xlator,
+                        trav->xlator->fops->writev_vers,
+                        local->fd, local->vector, local->count,
+                        local->off, local->flags, local->iobref,
+                        ctx->versions[i]);
+        }
+
+        return _gf_true;
 }
 
 int32_t
@@ -479,6 +484,50 @@ hsrepl_notify (xlator_t *this, int32_t event, void *data, ...)
         return 0;
 }
 
+void *
+hsrepl_worker (void *arg)
+{
+        xlator_t                *this = arg;
+        hsrepl_private_t        *priv = this->private;
+        hsrepl_local_t          *local = NULL;
+        call_frame_t            *frame = NULL;
+        uint64_t                 ctx_int = 0;
+        hsrepl_ctx_t            *ctx_ptr = NULL;
+
+        for (;;) {
+                (void)pthread_mutex_lock(&priv->qlock);
+                while (!priv->qhead) {
+                        (void)pthread_cond_wait(&priv->cond,&priv->qlock);
+                }
+                local = priv->qhead;
+                priv->qhead = local->next;
+                if (!priv->qhead) {
+                        priv->qtail = NULL;
+                }
+                (void)pthread_mutex_unlock(&priv->qlock);
+                frame = local->frame;
+                gf_log (this->name, GF_LOG_DEBUG, "queuing wrong version");
+                if (inode_ctx_get(local->fd->inode,this,&ctx_int) != 0) {
+                        gf_log (this->name, GF_LOG_ERROR,
+                                "got retry frame without inode ctx");
+                        mem_put(local);
+                        STACK_UNWIND_STRICT(writev,frame,-1,EIO,NULL,NULL);
+                        continue;
+                }
+                ctx_ptr = CAST2PTR(ctx_int);
+                if (!hsrepl_writev_continue(frame,this,ctx_ptr)) {
+                        gf_log (this->name, GF_LOG_ERROR,
+                                "could not retry write");
+                        mem_put(local);
+                        STACK_UNWIND_STRICT(writev,frame,-1,EIO,NULL,NULL);
+                        continue;
+                }
+        }
+                
+
+        return NULL;
+}
+
 int32_t
 init (xlator_t *this)
 {
@@ -543,6 +592,10 @@ init (xlator_t *this)
 
 	gf_log (this->name, GF_LOG_DEBUG, "hsrepl xlator loaded");
 	this->private = priv;
+
+        (void)pthread_mutex_init(&priv->qlock,NULL);
+        (void)pthread_cond_init(&priv->cond,NULL);
+        (void)pthread_create(&priv->worker,NULL,hsrepl_worker,this);
 	return 0;
 
 free_stack_pool:
@@ -564,6 +617,9 @@ fini (xlator_t *this)
         if (!priv)
                 return;
         this->private = NULL;
+
+        (void)pthread_cancel(priv->worker);
+        (void)pthread_join(priv->worker,NULL);
 	GF_FREE (priv);
 
 	return;
