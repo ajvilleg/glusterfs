@@ -46,6 +46,9 @@ typedef struct {
         int32_t          real_op_ret;
         int32_t          real_op_errno;
         uint32_t         version;
+        /* Following fields used by f/inodelk. */
+        inode_t         *inode;
+        short            l_type;
 } helper_local_t;
 
 enum gf_helper_mem_types_ {

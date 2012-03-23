@@ -198,6 +198,31 @@ helper_writev_vers_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
         return 0;
 }
 
+helper_ctx_t *
+helper_create_ctx (xlator_t *this, inode_t *inode)
+{
+        uint64_t          ctx_int = 0;
+        helper_ctx_t     *ctx_ptr = NULL;
+
+        ctx_ptr = GF_CALLOC(1,sizeof(*ctx_ptr),gf_helper_mt_ctx_t);
+        if (!ctx_ptr) {
+                gf_log (this->name, GF_LOG_WARNING,
+                        "failed to allocate context");
+                return NULL;
+        }
+        ctx_ptr->version = 888;
+        ctx_ptr->trans = NULL;
+
+        ctx_int = CAST2INT(ctx_ptr);
+        if (inode_ctx_set(inode,this,&ctx_int) != 0) {
+                gf_log (this->name, GF_LOG_WARNING, "failed to set context");
+                GF_FREE(ctx_ptr);
+                return NULL;
+        }
+
+        return ctx_ptr;
+}
+
 int32_t
 helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                struct iovec *vector, int32_t count, off_t off,
@@ -226,19 +251,9 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                 }
         }
         else {
-                ctx_ptr = GF_CALLOC(1,sizeof(*ctx_ptr),gf_helper_mt_ctx_t);
+                ctx_ptr = helper_create_ctx(this,fd->inode);
                 if (!ctx_ptr) {
-                        gf_log (this->name, GF_LOG_WARNING,
-                                "failed to allocate context");
                         goto err;
-                }
-                ctx_ptr->version = 888;
-                ctx_ptr->trans = NULL;
-                ctx_int = CAST2INT(ctx_ptr);
-                if (inode_ctx_set(fd->inode,this,&ctx_int) != 0) {
-                        gf_log (this->name, GF_LOG_WARNING,
-                                "failed to set context");
-                        goto free_ctx;
                 }
         }
         /*
@@ -270,8 +285,6 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
 	dict_unref(dict);
 	return 0;
 
-free_ctx:
-        GF_FREE(ctx_ptr);
 free_stub:
         call_stub_destroy(stub);
 err:
@@ -319,38 +332,74 @@ helper_setxattr (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
         return 0;
 }
 
-int32_t
-helper_truncate (call_frame_t *frame, xlator_t *this, loc_t *loc, off_t offset)
+void
+helper_bump_lock_count (xlator_t *this, inode_t *inode, int bump)
 {
-        inode_t         *inode = loc->inode;
         uint64_t         ctx_int = 0;
         helper_ctx_t    *ctx_ptr = NULL;
 
-        if (inode) {
-                if (inode_ctx_get(inode,this,&ctx_int) == 0) {
-                        ctx_ptr = CAST2PTR(ctx_int);
-                        ++(ctx_ptr->version);
-                }
+        if (!inode) {
+                return;
         }
 
-        STACK_WIND (frame, default_truncate_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->truncate, loc, offset);
+        if (inode_ctx_get(inode,this,&ctx_int) == 0) {
+                ctx_ptr = CAST2PTR(ctx_int);
+        }
+        else {
+                ctx_ptr = helper_create_ctx(this,inode);
+        }
+
+        if (!ctx_ptr) {
+                return;
+        }
+
+        gf_log (this->name, GF_LOG_DEBUG,
+                "bumping lock count by %d", bump);
+        ctx_ptr->locks += bump;
+        if (!ctx_ptr->locks) {
+                gf_log (this->name, GF_LOG_DEBUG,
+                        "bumping version for inodelk");
+                ++(ctx_ptr->version);
+        }
+}
+
+int32_t
+helper_inodelk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+                    int32_t op_ret, int32_t op_errno)
+{
+        helper_local_t  *local = frame->local;
+
+        /* Decrement on failed locks and successful unlocks. */
+        if ((op_ret < 0) == (local->l_type != F_UNLCK)) {
+                helper_bump_lock_count(this,local->inode,-1);
+        }
+
+        STACK_UNWIND_STRICT (inodelk, frame, op_ret, op_errno);
         return 0;
 }
 
 int32_t
-helper_ftruncate (call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset)
+helper_inodelk (call_frame_t *frame, xlator_t *this,
+                const char *volume, loc_t *loc, int32_t cmd,
+                struct gf_flock *lock)
 {
-        uint64_t          ctx_int = 0;
-        helper_ctx_t     *ctx_ptr = NULL;
+        helper_local_t  *local = NULL;
 
-        if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
-                ctx_ptr = CAST2PTR(ctx_int);
-                ++(ctx_ptr->version);
+        local = mem_get0(this->local_pool);
+        if (!local) {
+                STACK_UNWIND_STRICT(inodelk,frame,-1,ENOMEM);
+                return 0;
+        }
+        local->inode = loc->inode;
+        local->l_type = lock->l_type;
+        frame->local = local;
+        
+        if (lock->l_type != F_UNLCK) {
+                helper_bump_lock_count(this,local->inode,1);
         }
 
-        STACK_WIND (frame, default_ftruncate_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->ftruncate, fd, offset);
+        STACK_WIND (frame, helper_inodelk_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->inodelk, volume, loc, cmd, lock);
         return 0;
 }
 
@@ -358,27 +407,25 @@ int32_t
 helper_finodelk (call_frame_t *frame, xlator_t *this, const char *volume,
                  fd_t *fd, int32_t cmd, struct gf_flock *lock)
 {
-        uint64_t          ctx_int = 0;
-        helper_ctx_t     *ctx_ptr = NULL;
+        helper_local_t  *local = NULL;
 
-        if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
-                ctx_ptr = CAST2PTR(ctx_int);
-                if (lock->l_type == F_UNLCK) {
-                        if (--(ctx_ptr->locks) == 0) {
-                                ++(ctx_ptr->version);
-                        }
-                }
-                else {
-                        ++(ctx_ptr->locks);
-                }
+        local = mem_get0(this->local_pool);
+        if (!local) {
+                STACK_UNWIND_STRICT(inodelk,frame,-1,ENOMEM);
+                return 0;
+        }
+        local->inode = fd->inode;
+        local->l_type = lock->l_type;
+        frame->local = local;
+        
+        if (lock->l_type != F_UNLCK) {
+                helper_bump_lock_count(this,local->inode,1);
         }
 
-        STACK_WIND (frame, default_finodelk_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->finodelk,
-                    volume, fd, cmd, lock);
+        STACK_WIND (frame, helper_inodelk_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->finodelk, volume, fd, cmd, lock);
         return 0;
 }
-
 
 int32_t
 helper_get_partner_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
@@ -545,9 +592,8 @@ fini (xlator_t *this)
 struct xlator_fops fops = {
 	.writev_vers    = helper_writev,
         .setxattr       = helper_setxattr,
-        .truncate       = helper_truncate,
-        .ftruncate      = helper_ftruncate,
-        .finodelk       = helper_finodelk
+        .inodelk        = helper_inodelk,
+        .finodelk       = helper_finodelk,
 };
 
 struct xlator_cbks cbks = {
