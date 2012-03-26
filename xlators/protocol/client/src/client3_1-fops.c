@@ -844,6 +844,7 @@ client3_1_writev_vers_cbk (struct rpc_req *req, struct iovec *iov, int count,
         struct iatt  poststat = {0,};
         int ret = 0;
         xlator_t         *this       = NULL;
+        dict_t  *xdata       = NULL;
 
         this = THIS;
 
@@ -868,6 +869,10 @@ client3_1_writev_vers_cbk (struct rpc_req *req, struct iovec *iov, int count,
                 gf_stat_to_iatt (&rsp.poststat, &poststat);
         }
 
+        GF_PROTOCOL_DICT_UNSERIALIZE (this, xdata, (rsp.xdata.xdata_val),
+                                      (rsp.xdata.xdata_len), ret,
+                                      rsp.op_errno, out);
+
 out:
         if (rsp.op_ret == -1) {
                 gf_log (this->name, GF_LOG_WARNING, "remote operation failed: %s",
@@ -875,7 +880,13 @@ out:
         }
         STACK_UNWIND_STRICT (writev_vers, frame, rsp.op_ret,
                              gf_error_to_errno (rsp.op_errno), &prestat,
-                             &poststat, rsp.vers);
+                             &poststat, xdata, rsp.vers);
+
+        if (rsp.xdata.xdata_val)
+                free (rsp.xdata.xdata_val);
+
+        if (xdata)
+                dict_unref (xdata);
 
         return 0;
 }
@@ -4099,10 +4110,16 @@ client3_1_writev_vers (call_frame_t *frame, xlator_t *this, void *data)
                         "failed to send the fop: %s", strerror (op_errno));
         }
 
+        if (req.xdata.xdata_val)
+                GF_FREE (req.xdata.xdata_val);
+
         return 0;
 
 unwind:
-        STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno, NULL, NULL, 0);
+        STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno,
+                             NULL, NULL, NULL, 0);
+        if (req.xdata.xdata_val)
+                GF_FREE (req.xdata.xdata_val);
         return 0;
 }
 
@@ -4452,10 +4469,10 @@ client3_1_setxattr (call_frame_t *frame, xlator_t *this,
 
         args = data;
 
-        if (!(args->loc && args->loc->inode))
+        if (!args->loc)
                 goto unwind;
 
-        if (!uuid_is_null (args->loc->inode->gfid))
+        if (args->loc->inode && !uuid_is_null (args->loc->inode->gfid))
                 memcpy (req.gfid,  args->loc->inode->gfid, 16);
         else
                 memcpy (req.gfid, args->loc->gfid, 16);

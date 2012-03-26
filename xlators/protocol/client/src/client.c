@@ -965,7 +965,8 @@ out:
 int32_t
 client_writev_vers (call_frame_t *frame, xlator_t *this, fd_t *fd,
                struct iovec *vector, int32_t count, off_t off,
-               uint32_t flags, struct iobref *iobref, uint32_t version)
+               uint32_t flags, struct iobref *iobref, dict_t *xdata,
+               uint32_t version)
 {
         int          ret  = -1;
         clnt_conf_t *conf = NULL;
@@ -996,7 +997,7 @@ client_writev_vers (call_frame_t *frame, xlator_t *this, fd_t *fd,
 out:
         if (ret)
                 STACK_UNWIND_STRICT (writev_vers, frame, -1, ENOTCONN,
-                                     NULL, NULL, version);
+                                     NULL, NULL, NULL, version);
 
 	return 0;
 }

@@ -1418,7 +1418,7 @@ out:
 int
 server_writev_vers_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                    int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
-                   struct iatt *postbuf, uint32 version)
+                   struct iatt *postbuf, dict_t *xdata, uint32_t version)
 {
         gfs3_write_rsp    rsp   = {0,};
         server_state_t   *state = NULL;
@@ -1441,6 +1441,13 @@ server_writev_vers_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                         state->fd ? uuid_utoa (state->fd->inode->gfid) : "--",
                         op_ret, strerror (op_errno));
         }
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
+out:
+        rsp.op_ret    = op_ret;
+        rsp.op_errno  = gf_errno_to_error (op_errno);
 
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_write_rsp);
@@ -2742,12 +2749,14 @@ server_writev_vers_resume (call_frame_t *frame, xlator_t *bound_xl)
         STACK_WIND (frame, server_writev_vers_cbk,
                     bound_xl, bound_xl->fops->writev_vers,
                     state->fd, state->payload_vector, state->payload_count,
-                    state->offset, state->flags, state->iobref, state->version);
+                    state->offset, state->flags, state->iobref, state->xdata,
+                    state->version);
 
         return 0;
 err:
         server_writev_vers_cbk (frame, NULL, frame->this, state->resolve.op_ret,
-                           state->resolve.op_errno, NULL, NULL, state->version);
+                           state->resolve.op_errno, NULL, NULL, NULL,
+                           state->version);
         return 0;
 }
 

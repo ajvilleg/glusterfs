@@ -870,6 +870,7 @@ fop_writev_vers_cbk_stub (call_frame_t *frame,
 		     int32_t op_errno,
                      struct iatt *prebuf,
                      struct iatt *postbuf,
+                     dict_t *xdata,
                      uint32_t version);
 
 call_stub_t *

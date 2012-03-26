@@ -99,7 +99,8 @@ free_dict:
 
 int32_t
 helper_set_pending_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-			int32_t op_ret, int32_t op_errno, dict_t *dict)
+			int32_t op_ret, int32_t op_errno, dict_t *dict,
+                        dict_t *xdata)
 {
 	if (op_ret < 0) {
 		goto unwind;
@@ -109,26 +110,27 @@ helper_set_pending_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 	return 0;
 
 unwind:
-        STACK_UNWIND_STRICT (writev, frame, op_ret, op_errno, NULL, NULL);
+        STACK_UNWIND_STRICT (writev, frame, op_ret, op_errno, NULL, NULL, NULL);
         return 0;
 }
 
 int32_t
 helper_clr_pending_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-			int32_t op_ret, int32_t op_errno, dict_t *dict)
+			int32_t op_ret, int32_t op_errno, dict_t *dict,
+                        dict_t *xdata)
 {
         helper_local_t  *local = frame->local;
 
         STACK_UNWIND_STRICT (writev_vers, frame,
                              local->real_op_ret, local->real_op_errno,
-                             NULL, NULL, local->version);
+                             NULL, NULL, xdata, local->version);
         return 0;
 }
 
 int32_t
 helper_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                     int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
-                    struct iatt *postbuf)
+                    struct iatt *postbuf, dict_t *xdata)
 {
         helper_ctx_t    *ctx_ptr = frame->local;
         uint32_t         version = 0;
@@ -171,7 +173,7 @@ helper_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         STACK_WIND_COOKIE (frame, helper_clr_pending_cbk, cookie,
                            FIRST_CHILD(this), FIRST_CHILD(this)->fops->fxattrop,
-                           cookie, GF_XATTROP_ADD_ARRAY, dict);
+                           cookie, GF_XATTROP_ADD_ARRAY, dict, xdata);
 
         dict_unref(dict);
         return 0;
@@ -180,7 +182,7 @@ free_local:
         GF_FREE(local);
 unwind:
         STACK_UNWIND_STRICT (writev_vers, frame, op_ret, op_errno,
-                             prebuf, postbuf, version);
+                             prebuf, postbuf, xdata, version);
         return 0;
 
 }
@@ -188,13 +190,14 @@ unwind:
 int32_t
 helper_writev_vers_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
                        struct iovec *vector, int32_t count, off_t off,
-                       uint32_t flags, struct iobref *iobref, uint32_t version)
+                       uint32_t flags, struct iobref *iobref, dict_t *xdata,
+                       uint32_t version)
 {
         gf_log(this->name,GF_LOG_DEBUG,"got version %u",version);
 
         STACK_WIND_COOKIE (frame, helper_writev_cbk, fd,
                             FIRST_CHILD(this), FIRST_CHILD(this)->fops->writev,
-                            fd, vector, count, off, flags, iobref);
+                            fd, vector, count, off, flags, iobref, xdata);
         return 0;
 }
 
@@ -226,7 +229,8 @@ helper_create_ctx (xlator_t *this, inode_t *inode)
 int32_t
 helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                struct iovec *vector, int32_t count, off_t off,
-               uint32_t flags, struct iobref *iobref, uint32_t version)
+               uint32_t flags, struct iobref *iobref, dict_t *xdata,
+               uint32_t version)
 {
 	dict_t           *dict = NULL;
 	call_stub_t      *stub = NULL;
@@ -281,7 +285,7 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
 
 	STACK_WIND_COOKIE (frame, helper_set_pending_cbk, stub,
                            FIRST_CHILD(this), FIRST_CHILD(this)->fops->fxattrop,
-                           fd, GF_XATTROP_ADD_ARRAY, dict);
+                           fd, GF_XATTROP_ADD_ARRAY, dict, xdata);
 	dict_unref(dict);
 	return 0;
 
@@ -289,13 +293,13 @@ free_stub:
         call_stub_destroy(stub);
 err:
         STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno, NULL, NULL,
-                             ctx_ptr ? ctx_ptr->version : 0);
+                             xdata, ctx_ptr ? ctx_ptr->version : 0);
         return 0;
 }
 
 int32_t
 helper_setxattr (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
-                 int32_t flags)
+                 int32_t flags, dict_t *xdata)
 {
         char                    *self = NULL;
         char                    *partner = NULL;
@@ -328,7 +332,7 @@ helper_setxattr (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
         }
 
         STACK_WIND (frame, default_setxattr_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->setxattr, loc, dict, flags);
+                    FIRST_CHILD(this)->fops->setxattr, loc, dict, flags, xdata);
         return 0;
 }
 
@@ -365,7 +369,7 @@ helper_bump_lock_count (xlator_t *this, inode_t *inode, int bump)
 
 int32_t
 helper_inodelk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-                    int32_t op_ret, int32_t op_errno)
+                    int32_t op_ret, int32_t op_errno, dict_t *xdata)
 {
         helper_local_t  *local = frame->local;
 
@@ -374,20 +378,20 @@ helper_inodelk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 helper_bump_lock_count(this,local->inode,-1);
         }
 
-        STACK_UNWIND_STRICT (inodelk, frame, op_ret, op_errno);
+        STACK_UNWIND_STRICT (inodelk, frame, op_ret, op_errno, xdata);
         return 0;
 }
 
 int32_t
 helper_inodelk (call_frame_t *frame, xlator_t *this,
                 const char *volume, loc_t *loc, int32_t cmd,
-                struct gf_flock *lock)
+                struct gf_flock *lock, dict_t *xdata)
 {
         helper_local_t  *local = NULL;
 
         local = mem_get0(this->local_pool);
         if (!local) {
-                STACK_UNWIND_STRICT(inodelk,frame,-1,ENOMEM);
+                STACK_UNWIND_STRICT(inodelk,frame,-1,ENOMEM, xdata);
                 return 0;
         }
         local->inode = loc->inode;
@@ -399,19 +403,20 @@ helper_inodelk (call_frame_t *frame, xlator_t *this,
         }
 
         STACK_WIND (frame, helper_inodelk_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->inodelk, volume, loc, cmd, lock);
+                    FIRST_CHILD(this)->fops->inodelk, volume, loc, cmd, lock,
+                    xdata);
         return 0;
 }
 
 int32_t
 helper_finodelk (call_frame_t *frame, xlator_t *this, const char *volume,
-                 fd_t *fd, int32_t cmd, struct gf_flock *lock)
+                 fd_t *fd, int32_t cmd, struct gf_flock *lock, dict_t *xdata)
 {
         helper_local_t  *local = NULL;
 
         local = mem_get0(this->local_pool);
         if (!local) {
-                STACK_UNWIND_STRICT(inodelk,frame,-1,ENOMEM);
+                STACK_UNWIND_STRICT(inodelk,frame,-1,ENOMEM,xdata);
                 return 0;
         }
         local->inode = fd->inode;
@@ -423,7 +428,8 @@ helper_finodelk (call_frame_t *frame, xlator_t *this, const char *volume,
         }
 
         STACK_WIND (frame, helper_inodelk_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->finodelk, volume, fd, cmd, lock);
+                    FIRST_CHILD(this)->fops->finodelk, volume, fd, cmd, lock,
+                    xdata);
         return 0;
 }
 
@@ -489,7 +495,7 @@ notify (xlator_t *this, int32_t event, void *data, ...)
                         child = FIRST_CHILD(this);
                         STACK_WIND (newframe, helper_get_partner_cbk,
                                     child,child->fops->getxattr, &tmploc,
-                                    PARTNER_XATTR);
+                                    PARTNER_XATTR, NULL);
                 }
                 else {
                         SAFETY_MSG("create_frame failed");

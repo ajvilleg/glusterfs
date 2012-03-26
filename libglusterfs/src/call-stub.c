@@ -2587,6 +2587,7 @@ call_resume_wind (call_stub_t *stub)
                                       stub->args.writev.off,
                                       stub->args.writev.flags,
                                       stub->args.writev.iobref,
+                                      stub->xdata,
                                       stub->args.writev.version);
                 break;
         }
@@ -3189,6 +3190,7 @@ call_resume_unwind (call_stub_t *stub)
                                                   stub->args.writev_cbk.op_errno,
                                                   &stub->args.writev_cbk.prebuf,
                                                   &stub->args.writev_cbk.postbuf,
+                                                  stub->xdata,
                                                   stub->args.writev_cbk.version);
                 break;
         }

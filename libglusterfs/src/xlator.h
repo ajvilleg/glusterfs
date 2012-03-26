@@ -285,6 +285,7 @@ typedef int32_t (*fop_writev_vers_cbk_t) (call_frame_t *frame,
                                      int32_t op_errno,
                                      struct iatt *prebuf,
                                      struct iatt *postbuf,
+                                     dict_t *xdata,
                                      uint32_t version);
 
 typedef int32_t (*fop_flush_cbk_t) (call_frame_t *frame,
@@ -536,6 +537,7 @@ typedef int32_t (*fop_writev_vers_t) (call_frame_t *frame,
                                  off_t offset,
                                  uint32_t flags,
                                  struct iobref *iobref,
+                                 dict_t *xdata,
                                  uint32_t version);
 
 typedef int32_t (*fop_flush_t) (call_frame_t *frame,

@@ -107,7 +107,7 @@ free_dict:
 
 int32_t
 hsrepl_decr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-                 int32_t op_ret, int32_t op_errno, dict_t *dict)
+                 int32_t op_ret, int32_t op_errno, dict_t *dict, dict_t *xdata)
 {
         hsrepl_local_t          *local          = frame->local;
         gf_boolean_t             done           = _gf_false;
@@ -131,7 +131,7 @@ hsrepl_decr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 int32_t
 hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                    int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
-                   struct iatt *postbuf, uint32_t version)
+                   struct iatt *postbuf, dict_t *xdata, uint32_t version)
 {
         hsrepl_local_t          *local          = frame->local;
         gf_boolean_t             done           = _gf_false;
@@ -191,6 +191,9 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         }
 
         iobref_unref(local->iobref);
+        if (local->xdata) {
+                dict_unref(local->xdata);
+        }
 
         if (local->errors) {
                 op_ret = local->good_op_ret;
@@ -229,7 +232,8 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                         }
                         STACK_WIND_COOKIE (newframe, hsrepl_decr_cbk, local->fd,
                                     trav->xlator, trav->xlator->fops->fxattrop,
-                                    local->fd, GF_XATTROP_ADD_ARRAY, dict);
+                                    local->fd, GF_XATTROP_ADD_ARRAY, dict,
+                                    NULL);
                         dict_unref(dict);
                         trav = trav->next;
                 }
@@ -239,20 +243,21 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         }
 
 unwind:
-        STACK_UNWIND_STRICT(writev, frame, op_ret, op_errno, prebuf, postbuf);
+        STACK_UNWIND_STRICT (writev, frame, op_ret, op_errno, prebuf, postbuf,
+                             xdata);
 out:
         return 0;
 
 err:
         fd_unref(local->fd);
-        STACK_UNWIND_STRICT(writev, frame, -1, op_errno, NULL, NULL);
+        STACK_UNWIND_STRICT(writev, frame, -1, op_errno, NULL, NULL, NULL);
         return 0;
 }
 
 int32_t
 hsrepl_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                struct iovec *vector, int32_t count, off_t off,
-               uint32_t flags, struct iobref *iobref)
+               uint32_t flags, struct iobref *iobref, dict_t *xdata)
 {
         hsrepl_local_t   *local  = NULL;
         uint8_t           i      = 0;
@@ -295,6 +300,7 @@ hsrepl_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         local->off = off;
         local->flags = flags;
         local->iobref = iobref_ref(iobref);
+        local->xdata = xdata ? dict_ref(xdata) : NULL;
         frame->local = local;
 
         if (!hsrepl_writev_continue(frame,this,ctx_ptr)) {
@@ -309,7 +315,7 @@ free_ctx:
 free_local:
         mem_put(local);
 err:
-        STACK_UNWIND_STRICT(writev, frame, -1, op_errno, NULL, NULL);
+        STACK_UNWIND_STRICT(writev, frame, -1, op_errno, NULL, NULL, NULL);
         return 0;
 }
 
@@ -343,13 +349,11 @@ hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx)
                 }
                 gf_log (this->name, GF_LOG_DEBUG,
                         "sending version %u to %u", ctx->versions[i], i);
-                /* TBD: use a queue+thread to avoid recursion */
-                STACK_WIND_COOKIE(frame,hsrepl_writev_cbk,
-                        CAST2PTR(i), trav->xlator,
-                        trav->xlator->fops->writev_vers,
-                        local->fd, local->vector, local->count,
-                        local->off, local->flags, local->iobref,
-                        ctx->versions[i]);
+                STACK_WIND_COOKIE(frame,hsrepl_writev_cbk, CAST2PTR(i),
+                                  trav->xlator, trav->xlator->fops->writev_vers,
+                                  local->fd, local->vector, local->count,
+                                  local->off, local->flags, local->iobref,
+                                  local->xdata, ctx->versions[i]);
         }
 
         return _gf_true;
@@ -357,7 +361,7 @@ hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx)
 
 int32_t
 hsrepl_np_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-               int32_t op_ret, int32_t op_errno)
+               int32_t op_ret, int32_t op_errno, dict_t *xdata)
 {
         xlator_t *child = cookie;
 
@@ -415,7 +419,7 @@ hsrepl_notify_partner (xlator_t *this, xlator_t *child1)
 
         STACK_WIND_COOKIE (newframe, hsrepl_np_cbk, child1,
                            child1, child1->fops->setxattr,
-                           &tmploc, dict, 0);
+                           &tmploc, dict, 0, NULL);
 
         /* TBD: support multiple partners */
         return;
@@ -511,7 +515,7 @@ hsrepl_worker (void *arg)
                         gf_log (this->name, GF_LOG_ERROR,
                                 "got retry frame without inode ctx");
                         mem_put(local);
-                        STACK_UNWIND_STRICT(writev,frame,-1,EIO,NULL,NULL);
+                        STACK_UNWIND_STRICT(writev,frame,-1,EIO,NULL,NULL,NULL);
                         continue;
                 }
                 ctx_ptr = CAST2PTR(ctx_int);
@@ -519,7 +523,7 @@ hsrepl_worker (void *arg)
                         gf_log (this->name, GF_LOG_ERROR,
                                 "could not retry write");
                         mem_put(local);
-                        STACK_UNWIND_STRICT(writev,frame,-1,EIO,NULL,NULL);
+                        STACK_UNWIND_STRICT(writev,frame,-1,EIO,NULL,NULL,NULL);
                         continue;
                 }
         }
