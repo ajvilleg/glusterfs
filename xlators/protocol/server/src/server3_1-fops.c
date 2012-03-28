@@ -1390,7 +1390,7 @@ server_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (op_ret >= 0) {
                 gf_stat_from_iatt (&rsp.prestat, prebuf);
                 gf_stat_from_iatt (&rsp.poststat, postbuf);
-        } else {
+        } else if (op_errno != EKEYEXPIRED) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": WRITEV %"PRId64" (%s) ==> %"PRId32" (%s)",
                         frame->root->unique, state->resolve.fd_no,
@@ -3378,85 +3378,7 @@ out:
 
 
 int
-server_writev (rpcsvc_request_t *req)
-{
-        server_state_t      *state  = NULL;
-        call_frame_t        *frame  = NULL;
-        gfs3_write_req       args   = {{0,},};
-        ssize_t              len    = 0;
-        int                  i      = 0;
-        int                  ret    = -1;
-        int                  op_errno = 0;
-
-        if (!req)
-                return ret;
-
-        len = xdr_to_generic (req->msg[0], &args, (xdrproc_t)xdr_gfs3_write_req);
-        if (len == 0) {
-                //failed to decode msg;
-                req->rpc_err = GARBAGE_ARGS;
-                goto out;
-        }
-
-        frame = get_frame_from_request (req);
-        if (!frame) {
-                // something wrong, mostly insufficient memory
-                req->rpc_err = GARBAGE_ARGS; /* TODO */
-                goto out;
-        }
-        frame->root->op = GF_FOP_WRITE;
-
-        state = CALL_STATE (frame);
-        if (!state->conn->bound_xl) {
-                /* auth failure, request on subvolume without setvolume */
-                req->rpc_err = GARBAGE_ARGS;
-                goto out;
-        }
-
-        state->resolve.type  = RESOLVE_MUST;
-        state->resolve.fd_no = args.fd;
-        state->offset        = args.offset;
-        state->flags         = args.flag;
-        state->iobref        = iobref_ref (req->iobref);
-        memcpy (state->resolve.gfid, args.gfid, 16);
-
-        if (len < req->msg[0].iov_len) {
-                state->payload_vector[0].iov_base
-                        = (req->msg[0].iov_base + len);
-                state->payload_vector[0].iov_len
-                        = req->msg[0].iov_len - len;
-                state->payload_count = 1;
-        }
-
-        for (i = 1; i < req->count; i++) {
-                state->payload_vector[state->payload_count++]
-                        = req->msg[i];
-        }
-
-        for (i = 0; i < state->payload_count; i++) {
-                state->size += state->payload_vector[i].iov_len;
-        }
-
-        GF_PROTOCOL_DICT_UNSERIALIZE (state->conn->bound_xl, state->xdata,
-                                      (args.xdata.xdata_val),
-                                      (args.xdata.xdata_len), ret,
-                                      op_errno, out);
-
-        ret = 0;
-        resolve_and_resume (frame, server_writev_resume);
-out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
-
-        if (op_errno)
-                req->rpc_err = GARBAGE_ARGS;
-
-        return ret;
-}
-
-
-int
-server_writev_vers (rpcsvc_request_t *req)
+server_writev_common (rpcsvc_request_t *req, gf_boolean_t do_vers)
 {
         server_state_t      *state  = NULL;
         call_frame_t        *frame  = NULL;
@@ -3522,7 +3444,9 @@ server_writev_vers (rpcsvc_request_t *req)
         state->offset        = args.offset;
         state->flags         = args.flag;
         state->iobref        = iobref_ref (req->iobref);
-        state->version       = args.vers;
+        if (do_vers) {
+                state->version       = args.vers;
+        }
         memcpy (state->resolve.gfid, args.gfid, 16);
 
         GF_PROTOCOL_DICT_UNSERIALIZE (state->conn->bound_xl, state->xdata,
@@ -3558,7 +3482,12 @@ server_writev_vers (rpcsvc_request_t *req)
 
         req->rpc_err = SUCCESS;
         ret = 0;
-        resolve_and_resume (frame, server_writev_vers_resume);
+        if (do_vers) {
+                resolve_and_resume (frame, server_writev_vers_resume);
+        }
+        else {
+                resolve_and_resume (frame, server_writev_resume);
+        }
 out:
        return ret;
 dict_err:
@@ -3568,8 +3497,20 @@ dict_err:
          */
         req->rpc_err = GARBAGE_ARGS;
         return -1;
- }
+}
 
+
+int
+server_writev (rpcsvc_request_t *req)
+{
+        return server_writev_common(req,_gf_false);
+}
+
+int
+server_writev_vers (rpcsvc_request_t *req)
+{
+        return server_writev_common(req,_gf_true);
+}
 
 int
 server_writev_vec (rpcsvc_request_t *req, struct iovec *payload,

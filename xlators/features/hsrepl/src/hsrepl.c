@@ -130,7 +130,7 @@ hsrepl_decr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 int32_t
 hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                    int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
-                   struct iatt *postbuf, dict_t *xdata, uint32_t version)
+                   struct iatt *postbuf, dict_t *xdata)
 {
         hsrepl_local_t          *local          = frame->local;
         gf_boolean_t             done           = _gf_false;
@@ -141,16 +141,11 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         uint8_t                  i              = 0;
         hsrepl_ctx_t            *ctx            = local->ctx;
         gf_boolean_t             up_copy[2]     = { _gf_false, };
-        uint32_t                 xversion       = 0;
+        uint32_t                 version       = 0;
 
-        if (dict_get_uint32(xdata,"hsrepl.reply-vers",&xversion) != 0) {
+        if (dict_get_uint32(xdata,"hsrepl.reply-vers",&version) != 0) {
                 gf_log (this->name, GF_LOG_WARNING,
                         "could not get reply-vers");
-        }
-        else if (xversion != version) {
-                gf_log (this->name, GF_LOG_WARNING,
-                        "xversion %u does not match old version %u",
-                        xversion, version);
         }
 
         LOCK(&frame->lock);
@@ -393,10 +388,10 @@ hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx)
                 local->xdata[i] = hsrepl_add_version(local->xdata[i],
                                                      ctx->versions[i]);
                 STACK_WIND_COOKIE(frame,hsrepl_writev_cbk, CAST2PTR(i),
-                                  trav->xlator, trav->xlator->fops->writev_vers,
+                                  trav->xlator, trav->xlator->fops->writev,
                                   local->fd, local->vector, local->count,
                                   local->off, local->flags, local->iobref,
-                                  local->xdata[i], ctx->versions[i]);
+                                  local->xdata[i]);
         }
 
         return _gf_true;

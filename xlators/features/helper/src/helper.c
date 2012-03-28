@@ -148,9 +148,9 @@ helper_clr_pending_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         helper_local_t  *local = frame->local;
 
         xdata = helper_add_version(xdata,local->version);
-        STACK_UNWIND_STRICT (writev_vers, frame,
+        STACK_UNWIND_STRICT (writev, frame,
                              local->real_op_ret, local->real_op_errno,
-                             NULL, NULL, xdata, local->version);
+                             NULL, NULL, xdata);
         dict_unref(xdata);
         return 0;
 }
@@ -211,8 +211,8 @@ free_local:
         GF_FREE(local);
 unwind:
         xdata = helper_add_version(xdata,version);
-        STACK_UNWIND_STRICT (writev_vers, frame, op_ret, op_errno,
-                             prebuf, postbuf, xdata, version);
+        STACK_UNWIND_STRICT (writev, frame, op_ret, op_errno,
+                             prebuf, postbuf, xdata);
         dict_unref(xdata);
         return 0;
 
@@ -257,8 +257,7 @@ helper_create_ctx (xlator_t *this, inode_t *inode)
 int32_t
 helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                struct iovec *vector, int32_t count, off_t off,
-               uint32_t flags, struct iobref *iobref, dict_t *xdata,
-               uint32_t version)
+               uint32_t flags, struct iobref *iobref, dict_t *xdata)
 {
 	dict_t           *dict = NULL;
 	call_stub_t      *stub = NULL;
@@ -266,16 +265,11 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         uint64_t          ctx_int = 0;
         helper_ctx_t     *ctx_ptr = NULL;
         helper_private_t *priv = this->private;
-        uint32_t          xversion = 0;
+        uint32_t          version = 0;
 
-        if (dict_get_uint32(xdata,"hsrepl.request-vers",&xversion) != 0) {
+        if (dict_get_uint32(xdata,"hsrepl.request-vers",&version) != 0) {
                 gf_log (this->name, GF_LOG_WARNING,
                         "could not get request-vers");
-        }
-        else if (xversion != version) {
-                gf_log (this->name, GF_LOG_WARNING,
-                        "xversion %u does not match old version %u",
-                        xversion, version);
         }
 
         if (!priv->self_xattr || !priv->partner_xattr) {
@@ -333,13 +327,13 @@ free_stub:
 err:
         if (ctx_ptr) {
                 xdata = helper_add_version(xdata,ctx_ptr->version);
-                STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno,
-                                     NULL, NULL, xdata, ctx_ptr->version);
+                STACK_UNWIND_STRICT (writev, frame, -1, op_errno,
+                                     NULL, NULL, xdata);
                 dict_unref(xdata);
         }
         else {
-                STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno,
-                                     NULL, NULL, xdata, 0);
+                STACK_UNWIND_STRICT (writev, frame, -1, op_errno,
+                                     NULL, NULL, xdata);
         }
         return 0;
 }
@@ -656,7 +650,7 @@ fini (xlator_t *this)
 }
 
 struct xlator_fops fops = {
-	.writev_vers    = helper_writev,
+	.writev         = helper_writev,
         .setxattr       = helper_setxattr,
         .inodelk        = helper_inodelk,
         .finodelk       = helper_finodelk,

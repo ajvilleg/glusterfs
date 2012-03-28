@@ -817,7 +817,7 @@ client3_1_writev_cbk (struct rpc_req *req, struct iovec *iov, int count,
                                       rsp.op_errno, out);
 
 out:
-        if (rsp.op_ret == -1) {
+        if ((rsp.op_ret == -1) && (rsp.op_errno != EKEYEXPIRED)) {
                 gf_log (this->name, GF_LOG_WARNING, "remote operation failed: %s",
                         strerror (gf_error_to_errno (rsp.op_errno)));
         }
