@@ -65,7 +65,6 @@ enum gf_fop_procnum {
         GFS3_OP_RELEASE,
         GFS3_OP_RELEASEDIR,
         GFS3_OP_FREMOVEXATTR,
-        GFS3_OP_WRITE_VERS,
         GFS3_OP_MAXVALUE,
 } ;
 

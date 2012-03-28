@@ -1416,47 +1416,6 @@ out:
 
 
 int
-server_writev_vers_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-                   int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
-                   struct iatt *postbuf, dict_t *xdata, uint32_t version)
-{
-        gfs3_write_rsp    rsp   = {0,};
-        server_state_t   *state = NULL;
-        rpcsvc_request_t *req   = NULL;
-
-        req           = frame->local;
-
-        rsp.op_ret    = op_ret;
-        rsp.op_errno  = gf_errno_to_error (op_errno);
-        rsp.vers      = version;
-
-        state = CALL_STATE(frame);
-        if (op_ret >= 0) {
-                gf_stat_from_iatt (&rsp.prestat, prebuf);
-                gf_stat_from_iatt (&rsp.poststat, postbuf);
-        } else if (op_errno != EKEYEXPIRED) {
-                gf_log (this->name, GF_LOG_INFO,
-                        "%"PRId64": WRITEV %"PRId64" (%s) ==> %"PRId32" (%s)",
-                        frame->root->unique, state->resolve.fd_no,
-                        state->fd ? uuid_utoa (state->fd->inode->gfid) : "--",
-                        op_ret, strerror (op_errno));
-        }
-
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
-out:
-        rsp.op_ret    = op_ret;
-        rsp.op_errno  = gf_errno_to_error (op_errno);
-
-        server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
-                             (xdrproc_t)xdr_gfs3_write_rsp);
-
-        return 0;
-}
-
-
-int
 server_readv_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                   int32_t op_ret, int32_t op_errno,
                   struct iovec *vector, int32_t count,
@@ -2737,31 +2696,6 @@ err:
 
 
 int
-server_writev_vers_resume (call_frame_t *frame, xlator_t *bound_xl)
-{
-        server_state_t   *state = NULL;
-
-        state = CALL_STATE (frame);
-
-        if (state->resolve.op_ret != 0)
-                goto err;
-
-        STACK_WIND (frame, server_writev_vers_cbk,
-                    bound_xl, bound_xl->fops->writev_vers,
-                    state->fd, state->payload_vector, state->payload_count,
-                    state->offset, state->flags, state->iobref, state->xdata,
-                    state->version);
-
-        return 0;
-err:
-        server_writev_vers_cbk (frame, NULL, frame->this, state->resolve.op_ret,
-                           state->resolve.op_errno, NULL, NULL, NULL,
-                           state->version);
-        return 0;
-}
-
-
-int
 server_readv_resume (call_frame_t *frame, xlator_t *bound_xl)
 {
         server_state_t    *state = NULL;
@@ -3378,7 +3312,7 @@ out:
 
 
 int
-server_writev_common (rpcsvc_request_t *req, gf_boolean_t do_vers)
+server_writev (rpcsvc_request_t *req)
 {
         server_state_t      *state  = NULL;
         call_frame_t        *frame  = NULL;
@@ -3444,9 +3378,6 @@ server_writev_common (rpcsvc_request_t *req, gf_boolean_t do_vers)
         state->offset        = args.offset;
         state->flags         = args.flag;
         state->iobref        = iobref_ref (req->iobref);
-        if (do_vers) {
-                state->version       = args.vers;
-        }
         memcpy (state->resolve.gfid, args.gfid, 16);
 
         GF_PROTOCOL_DICT_UNSERIALIZE (state->conn->bound_xl, state->xdata,
@@ -3482,12 +3413,7 @@ server_writev_common (rpcsvc_request_t *req, gf_boolean_t do_vers)
 
         req->rpc_err = SUCCESS;
         ret = 0;
-        if (do_vers) {
-                resolve_and_resume (frame, server_writev_vers_resume);
-        }
-        else {
-                resolve_and_resume (frame, server_writev_resume);
-        }
+        resolve_and_resume (frame, server_writev_resume);
 out:
        return ret;
 dict_err:
@@ -3501,29 +3427,10 @@ dict_err:
 
 
 int
-server_writev (rpcsvc_request_t *req)
-{
-        return server_writev_common(req,_gf_false);
-}
-
-int
-server_writev_vers (rpcsvc_request_t *req)
-{
-        return server_writev_common(req,_gf_true);
-}
-
-int
 server_writev_vec (rpcsvc_request_t *req, struct iovec *payload,
                    int payload_count, struct iobref *iobref)
 {
         return server_writev (req);
-}
-
-int
-server_writev_vers_vec (rpcsvc_request_t *req, struct iovec *payload,
-                   int payload_count, struct iobref *iobref)
-{
-        return server_writev_vers (req);
 }
 
 #define SERVER3_1_VECWRITE_START 0
@@ -5760,7 +5667,6 @@ rpcsvc_actor_t glusterfs3_1_fop_actors[] = {
         [GFS3_OP_OPEN]        = { "OPEN",       GFS3_OP_OPEN, server_open, NULL, NULL, 0},
         [GFS3_OP_READ]        = { "READ",       GFS3_OP_READ, server_readv, NULL, NULL, 0},
         [GFS3_OP_WRITE]       = { "WRITE",      GFS3_OP_WRITE, server_writev, server_writev_vec, server_writev_vecsizer, 0},
-        [GFS3_OP_WRITE_VERS]  = { "WRITE_VERS", GFS3_OP_WRITE_VERS, server_writev_vers, server_writev_vers_vec, server_writev_vecsizer, 0},
         [GFS3_OP_STATFS]      = { "STATFS",     GFS3_OP_STATFS, server_statfs, NULL, NULL, 0},
         [GFS3_OP_FLUSH]       = { "FLUSH",      GFS3_OP_FLUSH, server_flush, NULL, NULL, 0},
         [GFS3_OP_FSYNC]       = { "FSYNC",      GFS3_OP_FSYNC, server_fsync, NULL, NULL, 0},

@@ -227,17 +227,6 @@ default_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
 
 int32_t
-default_writev_vers_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-                    int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
-                    struct iatt *postbuf, dict_t *xdata, uint32_t version)
-{
-        STACK_UNWIND_STRICT (writev_vers, frame, op_ret, op_errno,
-                             prebuf, postbuf, xdata, version);
-        return 0;
-}
-
-
-int32_t
 default_flush_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                    int32_t op_ret, int32_t op_errno,
                    dict_t *xdata)
@@ -570,18 +559,6 @@ default_writev_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
         STACK_WIND (frame, default_writev_cbk, FIRST_CHILD(this),
                     FIRST_CHILD(this)->fops->writev, fd, vector, count, off,
                     flags, iobref, xdata);
-        return 0;
-}
-
-int32_t
-default_writev_vers_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
-                       struct iovec *vector, int32_t count, off_t off,
-                       uint32_t flags, struct iobref *iobref, dict_t *xdata,
-                       uint32_t version)
-{
-        STACK_WIND (frame, default_writev_vers_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->writev_vers, fd, vector, count,
-                    off, flags, iobref, xdata, version);
         return 0;
 }
 
@@ -979,17 +956,6 @@ default_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         STACK_WIND (frame, default_writev_cbk, FIRST_CHILD(this),
                     FIRST_CHILD(this)->fops->writev, fd, vector, count, off,
                     flags, iobref, xdata);
-        return 0;
-}
-
-int32_t
-default_writev_vers (call_frame_t *frame, xlator_t *this, fd_t *fd,
-                struct iovec *vector, int32_t count, off_t off, uint32_t flags,
-                struct iobref *iobref, dict_t *xdata, uint32_t version)
-{
-        STACK_WIND (frame, default_writev_vers_cbk, FIRST_CHILD(this),
-                    FIRST_CHILD(this)->fops->writev_vers, fd, vector, count,
-                    off, flags, iobref, xdata, version);
         return 0;
 }
 

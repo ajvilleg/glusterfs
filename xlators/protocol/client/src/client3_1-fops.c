@@ -835,63 +835,6 @@ out:
 }
 
 int
-client3_1_writev_vers_cbk (struct rpc_req *req, struct iovec *iov, int count,
-                      void *myframe)
-{
-        gfs3_write_rsp rsp = {0,};
-        call_frame_t   *frame = NULL;
-        struct iatt  prestat  = {0,};
-        struct iatt  poststat = {0,};
-        int ret = 0;
-        xlator_t         *this       = NULL;
-        dict_t  *xdata       = NULL;
-
-        this = THIS;
-
-        frame = myframe;
-
-        if (-1 == req->rpc_status) {
-                rsp.op_ret   = -1;
-                rsp.op_errno = ENOTCONN;
-                goto out;
-        }
-
-        ret = xdr_to_generic (*iov, &rsp, (xdrproc_t)xdr_gfs3_write_rsp);
-        if (ret < 0) {
-                gf_log (this->name, GF_LOG_ERROR, "XDR decoding failed");
-                rsp.op_ret   = -1;
-                rsp.op_errno = EINVAL;
-                goto out;
-        }
-
-        if (-1 != rsp.op_ret) {
-                gf_stat_to_iatt (&rsp.prestat, &prestat);
-                gf_stat_to_iatt (&rsp.poststat, &poststat);
-        }
-
-        GF_PROTOCOL_DICT_UNSERIALIZE (this, xdata, (rsp.xdata.xdata_val),
-                                      (rsp.xdata.xdata_len), ret,
-                                      rsp.op_errno, out);
-
-out:
-        if ((rsp.op_ret == -1) && (rsp.op_errno != EKEYEXPIRED)) {
-                gf_log (this->name, GF_LOG_WARNING, "remote operation failed: %s",
-                        strerror (gf_error_to_errno (rsp.op_errno)));
-        }
-        STACK_UNWIND_STRICT (writev_vers, frame, rsp.op_ret,
-                             gf_error_to_errno (rsp.op_errno), &prestat,
-                             &poststat, xdata, rsp.vers);
-
-        if (rsp.xdata.xdata_val)
-                free (rsp.xdata.xdata_val);
-
-        if (xdata)
-                dict_unref (xdata);
-
-        return 0;
-}
-
-int
 client3_1_flush_cbk (struct rpc_req *req, struct iovec *iov, int count,
                      void *myframe)
 {
@@ -4072,65 +4015,6 @@ unwind:
 
 
 int32_t
-client3_1_writev_vers (call_frame_t *frame, xlator_t *this, void *data)
-{
-        clnt_args_t    *args     = NULL;
-        int64_t         remote_fd = -1;
-        clnt_conf_t    *conf     = NULL;
-        gfs3_write_req  req      = {{0,},};
-        int             op_errno = ESTALE;
-        int             ret        = 0;
-
-        if (!frame || !this || !data)
-                goto unwind;
-
-        args = data;
-        conf = this->private;
-
-        CLIENT_GET_REMOTE_FD(conf, args->fd, remote_fd, op_errno, unwind);
-
-        req.size   = args->size;
-        req.offset = args->offset;
-        req.fd     = remote_fd;
-        req.flag   = args->flags;
-        req.vers   = args->version;
-
-        memcpy (req.gfid, args->fd->inode->gfid, 16);
-
-        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
-                                    req.xdata.xdata_len, op_errno, unwind);
-
-        ret = client_submit_vec_request (this, &req, frame, conf->fops,
-                                         GFS3_OP_WRITE_VERS,
-                                         client3_1_writev_vers_cbk,
-                                         args->vector, args->count,
-                                         args->iobref,
-                                         (xdrproc_t)xdr_gfs3_write_req);
-        if (ret) {
-                /*
-                 * If the lower layers fail to submit a request, they'll also
-                 * do the unwind for us (see rpc_clnt_submit), so don't unwind
-                 * here in such cases.
-                 */
-                gf_log (this->name, GF_LOG_WARNING,
-                        "failed to send the fop: %s", strerror (op_errno));
-        }
-
-        if (req.xdata.xdata_val)
-                GF_FREE (req.xdata.xdata_val);
-
-        return 0;
-
-unwind:
-        STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno,
-                             NULL, NULL, NULL, 0);
-        if (req.xdata.xdata_val)
-                GF_FREE (req.xdata.xdata_val);
-        return 0;
-}
-
-
-int32_t
 client3_1_flush (call_frame_t *frame, xlator_t *this,
                  void *data)
 {
@@ -5884,7 +5768,6 @@ rpc_clnt_procedure_t clnt3_1_fop_actors[GF_FOP_MAXVALUE] = {
         [GF_FOP_OPEN]        = { "OPEN",        client3_1_open },
         [GF_FOP_READ]        = { "READ",        client3_1_readv },
         [GF_FOP_WRITE]       = { "WRITE",       client3_1_writev },
-        [GF_FOP_WRITE_VERS]  = { "WRITE_VERS",  client3_1_writev_vers },
         [GF_FOP_STATFS]      = { "STATFS",      client3_1_statfs },
         [GF_FOP_FLUSH]       = { "FLUSH",       client3_1_flush },
         [GF_FOP_FSYNC]       = { "FSYNC",       client3_1_fsync },

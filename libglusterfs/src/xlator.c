@@ -61,7 +61,6 @@ fill_defaults (xlator_t *xl)
         SET_DEFAULT_FOP (truncate);
         SET_DEFAULT_FOP (readv);
         SET_DEFAULT_FOP (writev);
-        SET_DEFAULT_FOP (writev_vers);
         SET_DEFAULT_FOP (statfs);
         SET_DEFAULT_FOP (flush);
         SET_DEFAULT_FOP (fsync);
