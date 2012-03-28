@@ -35,9 +35,9 @@ rpc_clnt_prog_t clnt3_1_fop_prog;
 int
 client_submit_vec_request (xlator_t  *this, void *req, call_frame_t  *frame,
                            rpc_clnt_prog_t *prog, int procnum,
-                           fop_cbk_fn_t cbkfn,
-                           struct iovec  *payload, int payloadcnt,
-                           struct iobref *iobref, xdrproc_t xdrproc)
+                           fop_cbk_fn_t cbkfn, struct iovec  *payload,
+                           int payloadcnt, struct iobref *iobref,
+                           xdrproc_t xdrproc)
 {
         int             ret        = 0;
         clnt_conf_t    *conf       = NULL;
@@ -874,7 +874,7 @@ client3_1_writev_vers_cbk (struct rpc_req *req, struct iovec *iov, int count,
                                       rsp.op_errno, out);
 
 out:
-        if (rsp.op_ret == -1) {
+        if ((rsp.op_ret == -1) && (rsp.op_errno != EKEYEXPIRED)) {
                 gf_log (this->name, GF_LOG_WARNING, "remote operation failed: %s",
                         strerror (gf_error_to_errno (rsp.op_errno)));
         }
@@ -4040,6 +4040,9 @@ client3_1_writev (call_frame_t *frame, xlator_t *this, void *data)
 
         memcpy (req.gfid, args->fd->inode->gfid, 16);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
+                                    req.xdata.xdata_len, op_errno, unwind);
+
         ret = client_submit_vec_request (this, &req, frame, conf->fops,
                                          GFS3_OP_WRITE, client3_1_writev_cbk,
                                          args->vector, args->count,
@@ -4094,11 +4097,14 @@ client3_1_writev_vers (call_frame_t *frame, xlator_t *this, void *data)
 
         memcpy (req.gfid, args->fd->inode->gfid, 16);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
+                                    req.xdata.xdata_len, op_errno, unwind);
+
         ret = client_submit_vec_request (this, &req, frame, conf->fops,
                                          GFS3_OP_WRITE_VERS,
                                          client3_1_writev_vers_cbk,
-                                         args->vector,
-                                         args->count, args->iobref,
+                                         args->vector, args->count,
+                                         args->iobref,
                                          (xdrproc_t)xdr_gfs3_write_req);
         if (ret) {
                 /*

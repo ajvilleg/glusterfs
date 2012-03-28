@@ -983,6 +983,7 @@ client_writev_vers (call_frame_t *frame, xlator_t *this, fd_t *fd,
         args.offset = off;
         args.flags  = flags;
         args.iobref = iobref;
+        args.xdata = xdata;
         args.version = version;
 
         proc = &conf->fops->proctable[GF_FOP_WRITE_VERS];

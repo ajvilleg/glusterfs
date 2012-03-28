@@ -97,6 +97,32 @@ free_dict:
         return NULL;
 }
 
+dict_t *
+helper_add_version (dict_t *in_dict, uint32_t version)
+{
+        dict_t  *out_dict       = NULL;
+
+        if (in_dict) {
+                out_dict = dict_ref(in_dict);
+        }
+        else {
+                out_dict = dict_new();
+                if (!out_dict) {
+                        gf_log (THIS->name, GF_LOG_WARNING,
+                                "could not allocate out_dict");
+                        goto done;
+                }
+        }
+
+        if (dict_set_uint32(out_dict,"hsrepl.reply-vers",version) != 0) {
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "could not set reply-vers");
+        }
+
+done:
+        return out_dict;
+}
+
 int32_t
 helper_set_pending_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 			int32_t op_ret, int32_t op_errno, dict_t *dict,
@@ -121,9 +147,11 @@ helper_clr_pending_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 {
         helper_local_t  *local = frame->local;
 
+        xdata = helper_add_version(xdata,local->version);
         STACK_UNWIND_STRICT (writev_vers, frame,
                              local->real_op_ret, local->real_op_errno,
                              NULL, NULL, xdata, local->version);
+        dict_unref(xdata);
         return 0;
 }
 
@@ -144,9 +172,10 @@ helper_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         else {
                 gf_log (this->name, GF_LOG_DEBUG,
                         "incrementing version for different client");
-                version = ++(ctx_ptr->version);
+                ++(ctx_ptr->version);
                 ctx_ptr->trans = frame->root->trans;
         }
+        version = ctx_ptr->version;
 
         frame->local = NULL;
         if (op_ret >= 0) {
@@ -181,20 +210,19 @@ helper_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 free_local:
         GF_FREE(local);
 unwind:
+        xdata = helper_add_version(xdata,version);
         STACK_UNWIND_STRICT (writev_vers, frame, op_ret, op_errno,
                              prebuf, postbuf, xdata, version);
+        dict_unref(xdata);
         return 0;
 
 }
 
 int32_t
-helper_writev_vers_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
+helper_writev_resume (call_frame_t *frame, xlator_t *this, fd_t *fd,
                        struct iovec *vector, int32_t count, off_t off,
-                       uint32_t flags, struct iobref *iobref, dict_t *xdata,
-                       uint32_t version)
+                       uint32_t flags, struct iobref *iobref, dict_t *xdata)
 {
-        gf_log(this->name,GF_LOG_DEBUG,"got version %u",version);
-
         STACK_WIND_COOKIE (frame, helper_writev_cbk, fd,
                             FIRST_CHILD(this), FIRST_CHILD(this)->fops->writev,
                             fd, vector, count, off, flags, iobref, xdata);
@@ -238,6 +266,17 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         uint64_t          ctx_int = 0;
         helper_ctx_t     *ctx_ptr = NULL;
         helper_private_t *priv = this->private;
+        uint32_t          xversion = 0;
+
+        if (dict_get_uint32(xdata,"hsrepl.request-vers",&xversion) != 0) {
+                gf_log (this->name, GF_LOG_WARNING,
+                        "could not get request-vers");
+        }
+        else if (xversion != version) {
+                gf_log (this->name, GF_LOG_WARNING,
+                        "xversion %u does not match old version %u",
+                        xversion, version);
+        }
 
         if (!priv->self_xattr || !priv->partner_xattr) {
                 op_errno = ESRCH;
@@ -271,8 +310,8 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
          * writev function, but then we'd get into another translator's code
          * with "this" pointing to us.
          */
-	stub = fop_writev_vers_stub(frame, helper_writev_vers_resume,
-			       fd, vector, count, off, flags, iobref, version);
+	stub = fop_writev_stub(frame, helper_writev_resume,
+			       fd, vector, count, off, flags, iobref, xdata);
 	if (!stub) {
 		gf_log (this->name, GF_LOG_WARNING, "failed to allocate stub");
 		goto err;
@@ -292,8 +331,16 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
 free_stub:
         call_stub_destroy(stub);
 err:
-        STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno, NULL, NULL,
-                             xdata, ctx_ptr ? ctx_ptr->version : 0);
+        if (ctx_ptr) {
+                xdata = helper_add_version(xdata,ctx_ptr->version);
+                STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno,
+                                     NULL, NULL, xdata, ctx_ptr->version);
+                dict_unref(xdata);
+        }
+        else {
+                STACK_UNWIND_STRICT (writev_vers, frame, -1, op_errno,
+                                     NULL, NULL, xdata, 0);
+        }
         return 0;
 }
 
@@ -435,7 +482,8 @@ helper_finodelk (call_frame_t *frame, xlator_t *this, const char *volume,
 
 int32_t
 helper_get_partner_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-                        int32_t op_ret, int32_t op_errno, dict_t *dict)
+                        int32_t op_ret, int32_t op_errno, dict_t *dict,
+                        dict_t *xdata)
 {
         helper_private_t        *priv = this->private;
         char                    *self = NULL;
@@ -503,6 +551,18 @@ notify (xlator_t *this, int32_t event, void *data, ...)
                 break;
         default:
                 ;
+        }
+
+        return 0;
+}
+
+int
+helper_forget (xlator_t *this, inode_t *inode)
+{
+        uint64_t        ctx     = 0;
+
+        if (inode_ctx_get(inode,this,&ctx) == 0) {
+                GF_FREE(CAST2PTR(ctx));
         }
 
         return 0;
@@ -603,6 +663,7 @@ struct xlator_fops fops = {
 };
 
 struct xlator_cbks cbks = {
+        .forget      = helper_forget,
 };
 
 struct volume_options options[] = {

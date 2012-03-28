@@ -57,7 +57,7 @@ typedef struct _hsrepl_local {
         off_t                    off;
         uint32_t                 flags;
         struct iobref           *iobref;
-        dict_t                  *xdata;
+        dict_t                  *xdata[2];
         hsrepl_ctx_t            *ctx;
         uint32_t                 incrs[2];
         uint32_t                 good_op_ret;

@@ -119,7 +119,6 @@ hsrepl_decr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         done = (local->calls == 0);
         UNLOCK(&frame->lock);
 
-        dict_unref(dict);
         if (done) {
                 fd_unref(cookie);
                 STACK_DESTROY(frame->root);
@@ -142,6 +141,17 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         uint8_t                  i              = 0;
         hsrepl_ctx_t            *ctx            = local->ctx;
         gf_boolean_t             up_copy[2]     = { _gf_false, };
+        uint32_t                 xversion       = 0;
+
+        if (dict_get_uint32(xdata,"hsrepl.reply-vers",&xversion) != 0) {
+                gf_log (this->name, GF_LOG_WARNING,
+                        "could not get reply-vers");
+        }
+        else if (xversion != version) {
+                gf_log (this->name, GF_LOG_WARNING,
+                        "xversion %u does not match old version %u",
+                        xversion, version);
+        }
 
         LOCK(&frame->lock);
         --(local->calls);
@@ -163,19 +173,20 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 }
                 ++(local->incrs[CAST2INT(cookie)]);
         }
+        UNLOCK(&frame->lock);
+
         if (version) {
                 gf_log (this->name, GF_LOG_DEBUG,
                         "got version %u from %lu", version, CAST2INT(cookie));
                 ctx->versions[CAST2INT(cookie)] = version;
         }
-        UNLOCK(&frame->lock);
 
         if (!done) {
                 goto out;
         }
 
         if (local->conflicts) {
-                gf_log (this->name, GF_LOG_DEBUG, "queuing wrong version");
+                gf_log (this->name, GF_LOG_DEBUG, "enqueuing wrong version");
                 (void)pthread_mutex_lock(&priv->qlock);
                 local->next = NULL;
                 if (priv->qtail) {
@@ -191,8 +202,10 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         }
 
         iobref_unref(local->iobref);
-        if (local->xdata) {
-                dict_unref(local->xdata);
+        for (i = 0; i < 2; ++i) {
+                if (local->xdata[i]) {
+                        dict_unref(local->xdata[i]);
+                }
         }
 
         if (local->errors) {
@@ -300,7 +313,9 @@ hsrepl_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         local->off = off;
         local->flags = flags;
         local->iobref = iobref_ref(iobref);
-        local->xdata = xdata ? dict_ref(xdata) : NULL;
+        for (i = 0; i < 2; ++i) {
+                local->xdata[i] = /*xdata ? dict_copy(xdata,NULL) :*/ NULL;
+        }
         frame->local = local;
 
         if (!hsrepl_writev_continue(frame,this,ctx_ptr)) {
@@ -317,6 +332,32 @@ free_local:
 err:
         STACK_UNWIND_STRICT(writev, frame, -1, op_errno, NULL, NULL, NULL);
         return 0;
+}
+
+dict_t *
+hsrepl_add_version (dict_t *in_dict, uint32_t version)
+{
+        dict_t  *out_dict       = NULL;
+
+        if (in_dict) {
+                out_dict = in_dict;
+        }
+        else {
+                out_dict = dict_new();
+                if (!out_dict) {
+                        gf_log (THIS->name, GF_LOG_WARNING,
+                                "could not allocate out_dict");
+                        goto done;
+                }
+        }
+
+        if (dict_set_uint32(out_dict,"hsrepl.request-vers",version) != 0) {
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "could not set request-vers");
+        }
+
+done:
+        return out_dict;
 }
 
 gf_boolean_t
@@ -349,11 +390,13 @@ hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx)
                 }
                 gf_log (this->name, GF_LOG_DEBUG,
                         "sending version %u to %u", ctx->versions[i], i);
+                local->xdata[i] = hsrepl_add_version(local->xdata[i],
+                                                     ctx->versions[i]);
                 STACK_WIND_COOKIE(frame,hsrepl_writev_cbk, CAST2PTR(i),
                                   trav->xlator, trav->xlator->fops->writev_vers,
                                   local->fd, local->vector, local->count,
                                   local->off, local->flags, local->iobref,
-                                  local->xdata, ctx->versions[i]);
+                                  local->xdata[i], ctx->versions[i]);
         }
 
         return _gf_true;
@@ -510,7 +553,7 @@ hsrepl_worker (void *arg)
                 }
                 (void)pthread_mutex_unlock(&priv->qlock);
                 frame = local->frame;
-                gf_log (this->name, GF_LOG_DEBUG, "queuing wrong version");
+                gf_log (this->name, GF_LOG_DEBUG, "dequeuing wrong version");
                 if (inode_ctx_get(local->fd->inode,this,&ctx_int) != 0) {
                         gf_log (this->name, GF_LOG_ERROR,
                                 "got retry frame without inode ctx");
@@ -530,6 +573,18 @@ hsrepl_worker (void *arg)
                 
 
         return NULL;
+}
+
+int
+hsrepl_forget (xlator_t *this, inode_t *inode)
+{
+        uint64_t        ctx     = 0;
+
+        if (inode_ctx_get(inode,this,&ctx) == 0) {
+                GF_FREE(CAST2PTR(ctx));
+        }
+
+        return 0;
 }
 
 int32_t
@@ -634,6 +689,7 @@ struct xlator_fops fops = {
 };
 
 struct xlator_cbks cbks = {
+        .forget      = hsrepl_forget,
 };
 
 struct volume_options options[] = {
