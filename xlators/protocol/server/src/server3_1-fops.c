@@ -3330,30 +3330,40 @@ server_writev (rpcsvc_request_t *req)
                 return ret;
 
         /*
-         * This got really messed up with xdata.  Xdr_to_generic expects the
-         * variable-length xdata to be in the same contiguous memory buffer as
-         * the fixed part, but currently only the length is there.  It's hard
-         * to fix that on the client side, because it would have to happen in
-         * client_submit_vec_request which no longer knows enough about what
-         * kind of structure it's dealing with.  Similarly, it's really hard
-         * to change all of the calling conventions in the XDR code to deal
-         * with a buffer that's split into two parts.  The easiest solution is
-         * to squash them together here.
+         * This got much more complicated because of xdata.  Xdr_to_generic
+         * expects the variable-length xdata to be in the same contiguous
+         * memory buffer as the fixed part, but currently only the length is
+         * present.  We can't fix it in xdr_to_generic because that's generated
+         * code (and likewise on the client side).  We can't fix it in the
+         * transport layer's vector_sizer code, because the only way it could
+         * give the correct length would be to parse the first part of the
+         * request before we've even finished reading it - not only awkward,
+         * but a heinous layering violation as well.  The easiest way to fix
+         * it is here, even though that means we have to make some assumptions
+         * (i.e. that the fixed/variable split is as described and that the
+         * xdata length comes last in the fixed part).
          */
         req->rpc_err = GARBAGE_ARGS;
         xdp = (uint32_t *)(req->msg[0].iov_base + req->msg[0].iov_len
                                                 - sizeof(*xdp));
         xdl = ntohl(*xdp);
-        if ((req->count < 2) || (req->msg[1].iov_len < xdl)) {
-                goto out;
+        if (xdl > 0) {
+                if ((req->count < 2) || (req->msg[1].iov_len < xdl)) {
+                        goto out;
+                }
+                myiov.iov_base = alloca(req->msg[0].iov_len+xdl);
+                if (!myiov.iov_base) {
+                        goto out;
+                }
+                myiov.iov_len = req->msg[0].iov_len + xdl;
+                memcpy (myiov.iov_base,req->msg[0].iov_base,
+                        req->msg[0].iov_len);
+                memcpy (myiov.iov_base+req->msg[0].iov_len,req->msg[1].iov_base,
+                        xdl);
         }
-        myiov.iov_base = alloca(req->msg[0].iov_len+xdl);
-        if (!myiov.iov_base) {
-                goto out;
+        else {
+                myiov = req->msg[0];
         }
-        myiov.iov_len = req->msg[0].iov_len + xdl;
-        memcpy(myiov.iov_base,req->msg[0].iov_base,req->msg[0].iov_len);
-        memcpy(myiov.iov_base+req->msg[0].iov_len,req->msg[1].iov_base,xdl);
         len = xdr_to_generic (myiov, &args, (xdrproc_t)xdr_gfs3_write_req);
         if (len == 0) {
                 //failed to decode msg;
@@ -3390,20 +3400,18 @@ server_writev (rpcsvc_request_t *req)
                 if (len) {
                         if (len >= req->msg[i].iov_len) {
                                 len -= req->msg[i].iov_len;
+                                continue;
                         }
-                        else {
-                                state->payload_vector[j].iov_base
-                                        = (req->msg[i].iov_base + len);
-                                state->payload_vector[j].iov_len
-                                        = req->msg[i].iov_len - len;
-                                ++j;
-                                len = 0;
-                        }
+                        state->payload_vector[j].iov_base
+                                = (req->msg[i].iov_base + len);
+                        state->payload_vector[j].iov_len
+                                = req->msg[i].iov_len - len;
+                        len = 0;
                 }
                 else {
-                        state->payload_vector[state->payload_count++]
-                                = req->msg[i];
-                 }
+                        state->payload_vector[j] = req->msg[i];
+                }
+                ++j;
         }
         state->payload_count = j;
                  
