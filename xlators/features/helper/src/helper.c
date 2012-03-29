@@ -292,6 +292,7 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                 if (!ctx_ptr) {
                         goto err;
                 }
+                ctx_ptr->dirty = _gf_true;
         }
         /*
          * Warning: we cheat here by pointing "local" to the inode ctx.  This
@@ -402,9 +403,11 @@ helper_bump_lock_count (xlator_t *this, inode_t *inode, int bump)
                 "bumping lock count by %d", bump);
         ctx_ptr->locks += bump;
         if (!ctx_ptr->locks) {
-                gf_log (this->name, GF_LOG_DEBUG,
-                        "bumping version for inodelk");
-                ++(ctx_ptr->version);
+                if (ctx_ptr->dirty) {
+                        gf_log (this->name, GF_LOG_DEBUG,
+                                "bumping version for inodelk");
+                        ++(ctx_ptr->version);
+                }
         }
 }
 
