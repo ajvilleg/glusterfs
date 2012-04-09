@@ -268,8 +268,8 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         uint32_t          version = 0;
 
         if (dict_get_uint32(xdata,"hsrepl.request-vers",&version) != 0) {
-                gf_log (this->name, GF_LOG_WARNING,
-                        "could not get request-vers");
+                return default_writev (frame, this, fd, vector, count, off,
+                                       flags, iobref, xdata);
         }
 
         if (!priv->self_xattr || !priv->partner_xattr) {
@@ -279,6 +279,9 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
 
         if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
                 ctx_ptr = CAST2PTR(ctx_int);
+                if (!ctx_ptr) {
+                        goto err;
+                }
                 if ((version != ctx_ptr->version) || ctx_ptr->locks) {
                         gf_log (this->name, GF_LOG_DEBUG,
                                 "received %u != stored %u",
@@ -294,6 +297,7 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                 }
                 ctx_ptr->dirty = _gf_true;
         }
+
         /*
          * Warning: we cheat here by pointing "local" to the inode ctx.  This
          * must be undone before we unwind (and is, in helper_writev_cbk).
@@ -375,6 +379,22 @@ helper_setxattr (call_frame_t *frame, xlator_t *this, loc_t *loc, dict_t *dict,
 
         STACK_WIND (frame, default_setxattr_cbk, FIRST_CHILD(this),
                     FIRST_CHILD(this)->fops->setxattr, loc, dict, flags, xdata);
+        return 0;
+}
+
+int32_t
+helper_fxattrop (call_frame_t *frame, xlator_t *this, fd_t *fd,
+                 gf_xattrop_flags_t flags, dict_t *dict, dict_t *xdata)
+{
+        data_t  *data = NULL;
+
+        data = dict_get(dict,"trusted.afr.self-heal-erase");
+        if (data) {
+                gf_log (this->name, GF_LOG_DEBUG, "detected self-heal");
+        }
+
+        STACK_WIND (frame, default_fxattrop_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->fxattrop, fd, flags, dict, xdata);
         return 0;
 }
 
@@ -655,6 +675,7 @@ fini (xlator_t *this)
 struct xlator_fops fops = {
 	.writev         = helper_writev,
         .setxattr       = helper_setxattr,
+        .fxattrop       = helper_fxattrop,
         .inodelk        = helper_inodelk,
         .finodelk       = helper_finodelk,
 };

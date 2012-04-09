@@ -436,6 +436,8 @@ afr_sh_data_erase_pending (call_frame_t *frame, xlator_t *this)
 
                         erase_xattr[i] = get_new_dict();
                         dict_ref (erase_xattr[i]);
+                        dict_set_uint32(erase_xattr[i],
+                                        "trusted.afr.self-heal-erase", 'UBET');
                 }
         }
 
