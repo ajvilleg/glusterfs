@@ -1272,6 +1272,39 @@ err:
         return 0;
 }
 
+/* For directories, check if acl xattrs have been requested (by the acl xlator),
+ * if not, request for them. These xattrs are needed for dht dir self-heal to
+ * perform proper self-healing of dirs
+ */
+void
+dht_check_and_set_acl_xattr_req (inode_t *inode, dict_t *xattr_req)
+{
+        int     ret = 0;
+
+        GF_ASSERT (inode);
+        GF_ASSERT (xattr_req);
+
+        if (inode->ia_type != IA_IFDIR)
+                return;
+
+        if (!dict_get (xattr_req, POSIX_ACL_ACCESS_XATTR)) {
+                ret = dict_set_int8 (xattr_req, POSIX_ACL_ACCESS_XATTR, 0);
+                if (ret)
+                        gf_log (THIS->name, GF_LOG_WARNING,
+                                "failed to set key %s",
+                                POSIX_ACL_ACCESS_XATTR);
+        }
+
+        if (!dict_get (xattr_req, POSIX_ACL_DEFAULT_XATTR)) {
+                ret = dict_set_int8 (xattr_req, POSIX_ACL_DEFAULT_XATTR, 0);
+                if (ret)
+                        gf_log (THIS->name, GF_LOG_WARNING,
+                                "failed to set key %s",
+                                POSIX_ACL_DEFAULT_XATTR);
+        }
+
+        return;
+}
 
 int
 dht_lookup (call_frame_t *frame, xlator_t *this,
@@ -1395,6 +1428,9 @@ dht_lookup (call_frame_t *frame, xlator_t *this,
                 ret = dict_set_uint32 (local->xattr_req,
                                        GLUSTERFS_OPEN_FD_COUNT, 4);
 
+                /* need it for dir self-heal */
+                dht_check_and_set_acl_xattr_req (loc->inode, local->xattr_req);
+
 		for (i = 0; i < call_cnt; i++) {
 			subvol = layout->list[i].xlator;
 
@@ -1416,6 +1452,9 @@ dht_lookup (call_frame_t *frame, xlator_t *this,
                    'in-migration' state */
                 ret = dict_set_uint32 (local->xattr_req,
                                        GLUSTERFS_OPEN_FD_COUNT, 4);
+
+                /* need it for dir self-heal */
+                dht_check_and_set_acl_xattr_req (loc->inode, local->xattr_req);
 
                 if (!hashed_subvol) {
                         gf_log (this->name, GF_LOG_DEBUG,
@@ -4080,6 +4119,7 @@ dht_rmdir_is_subvol_empty (call_frame_t *frame, xlator_t *this,
         call_frame_t       *lookup_frame = NULL;
         dht_local_t        *lookup_local = NULL;
         dht_local_t        *local = NULL;
+        dict_t             *xattrs = NULL;
 
         local = frame->local;
 
@@ -4098,6 +4138,21 @@ dht_rmdir_is_subvol_empty (call_frame_t *frame, xlator_t *this,
                    be treated as non-empty
                 */
                 return 0;
+        }
+
+        xattrs = dict_new ();
+        if (!xattrs) {
+                gf_log (this->name, GF_LOG_ERROR, "dict_new failed");
+                return -1;
+        }
+
+        ret = dict_set_uint32 (xattrs, DHT_LINKFILE_KEY, 256);
+        if (ret) {
+                gf_log (this->name, GF_LOG_ERROR, "failed to set linkto key"
+                        " in dict");
+                if (xattrs)
+                        dict_unref (xattrs);
+                return -1;
         }
 
         list_for_each_entry (trav, &entries->list, list) {
@@ -4143,12 +4198,18 @@ dht_rmdir_is_subvol_empty (call_frame_t *frame, xlator_t *this,
 
                 STACK_WIND (lookup_frame, dht_rmdir_lookup_cbk,
                             src, src->fops->lookup,
-                            &lookup_local->loc, NULL);
+                            &lookup_local->loc, xattrs);
                 ret++;
         }
 
+        if (xattrs)
+                dict_unref (xattrs);
+
         return ret;
 err:
+        if (xattrs)
+                dict_unref (xattrs);
+
         DHT_STACK_DESTROY (lookup_frame);
         return 0;
 }

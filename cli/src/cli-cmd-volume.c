@@ -106,7 +106,7 @@ out:
         }
         frame->local = NULL;
         if (frame)
-                FRAME_DESTROY (frame);
+                STACK_DESTROY (frame->root);
 
         return ret;
 
@@ -175,6 +175,9 @@ out:
 
         if (dict)
                 dict_unref (dict);
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -401,6 +404,9 @@ out:
                         cli_out ("Volume create failed");
         }
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -451,6 +457,9 @@ out:
                 if ((sent == 0) && (parse_error == 0))
                         cli_out ("Volume delete failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 }
@@ -528,6 +537,9 @@ out:
                 if ((sent == 0) && (parse_error == 0))
                         cli_out ("Volume start failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 }
@@ -648,6 +660,10 @@ out:
         }
         if (dict)
                 dict_unref (dict);
+
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -704,6 +720,9 @@ out:
                         cli_out ("Volume rename on '%s' failed", (char *)words[2]);
         }
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -717,7 +736,6 @@ cli_cmd_volume_defrag_cbk (struct cli_state *state, struct cli_cmd_word *word,
         dict_t               *dict = NULL;
         int                     sent = 0;
         int                     parse_error = 0;
-        int                     index = 0;
 #ifdef GF_SOLARIS_HOST_OS
         cli_out ("Command not supported on Solaris");
         goto out;
@@ -738,7 +756,12 @@ cli_cmd_volume_defrag_cbk (struct cli_state *state, struct cli_cmd_word *word,
         }
 
         if (wordcount == 4) {
-                index = 3;
+                if (strcmp (words[3], "start") && strcmp (words[3], "stop") &&
+                    strcmp (words[3], "status")) {
+                            cli_usage_out (word->pattern);
+                            parse_error = 1;
+                            goto out;
+                    }
         } else {
                 if (strcmp (words[3], "fix-layout") &&
                     strcmp (words[3], "start")) {
@@ -746,15 +769,7 @@ cli_cmd_volume_defrag_cbk (struct cli_state *state, struct cli_cmd_word *word,
                         parse_error = 1;
                         goto out;
                 }
-                index = 4;
         }
-
-	if (strcmp (words[index], "start") && strcmp (words[index], "stop") &&
-            strcmp (words[index], "status") && strcmp (words[index], "force")) {
-	        cli_usage_out (word->pattern);
-		parse_error = 1;
-		goto out;
-	}
 
         ret = dict_set_str (dict, "volname", (char *)words[2]);
         if (ret)
@@ -799,6 +814,9 @@ out:
                         cli_out ("Volume rebalance failed");
         }
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -841,6 +859,9 @@ out:
                 if ((sent == 0) && (parse_error == 0))
                         cli_out ("Volume reset failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 
@@ -886,6 +907,9 @@ out:
                         cli_out ("Volume profile failed");
         }
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 
 }
@@ -930,6 +954,9 @@ out:
                         cli_out ("Volume set failed");
         }
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 
 }
@@ -945,6 +972,13 @@ cli_cmd_volume_add_brick_cbk (struct cli_state *state,
         dict_t                  *options = NULL;
         int                     sent = 0;
         int                     parse_error = 0;
+        gf_answer_t             answer = GF_ANSWER_NO;
+
+        const char *question = "Changing the 'stripe count' of the volume is "
+                "not a supported feature. In some cases it may result in data "
+                "loss on the volume. Also there may be issues with regular "
+                "filesystem operations on the volume after the change. Do you "
+                "really want to continue with 'stripe' count option ? ";
 
         frame = create_frame (THIS, THIS->ctx->pool);
         if (!frame)
@@ -956,6 +990,17 @@ cli_cmd_volume_add_brick_cbk (struct cli_state *state,
                 cli_usage_out (word->pattern);
                 parse_error = 1;
                 goto out;
+        }
+
+        /* TODO: there are challenges in supporting changing of
+           stripe-count, untill it is properly supported give warning to user */
+        if (dict_get (options, "stripe-count")) {
+                answer = cli_cmd_get_confirmation (state, question);
+
+                if (GF_ANSWER_NO == answer) {
+                        ret = 0;
+                        goto out;
+                }
         }
 
         proc = &cli_rpc_prog->proctable[GLUSTER_CLI_ADD_BRICK];
@@ -973,6 +1018,9 @@ out:
                 if ((sent == 0) && (parse_error == 0))
                         cli_out ("Volume add-brick failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 }
@@ -1025,6 +1073,9 @@ out:
 
         if (ret && parse_err == 0)
                 cli_out ("Quota command failed");
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 
@@ -1084,6 +1135,10 @@ out:
 
         if (options)
                 dict_unref (options);
+
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 
 }
@@ -1132,6 +1187,9 @@ out:
                 if ((sent == 0) && (parse_error == 0))
                         cli_out ("Volume replace-brick failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 }
@@ -1186,6 +1244,9 @@ out:
                         cli_out ("Volume top failed");
         }
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 
 }
@@ -1231,6 +1292,9 @@ out:
                 if ((sent == 0) && (parse_error == 0))
                         cli_out ("Volume log rotate failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 }
@@ -1334,6 +1398,9 @@ out:
         if (ret && parse_err == 0)
                 cli_out (GEOREP" command failed");
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -1379,6 +1446,10 @@ cli_cmd_volume_status_cbk (struct cli_state *state,
  out:
         if (dict)
                 dict_unref (dict);
+
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -1421,7 +1492,6 @@ cli_get_detail_status (dict_t *dict, int i, cli_volume_status_t *status)
                 status->block_size = 0;
         }
 
-#ifdef GF_LINUX_HOST_OS
         memset (key, 0, sizeof (key));
         snprintf (key, sizeof (key), "brick%d.mnt_options", i);
         ret = dict_get_str (dict, key, &(status->mount_options));
@@ -1435,41 +1505,28 @@ cli_get_detail_status (dict_t *dict, int i, cli_volume_status_t *status)
                 ret = 0;
                 status->fs_name = NULL;
         }
-#endif
 
-        if (status->fs_name && (IS_EXT_FS(status->fs_name) ||
-            !strcmp (status->fs_name, "xfs"))) {
-
-#ifdef GF_LINUX_HOST_OS
-                memset (key, 0, sizeof (key));
-                snprintf (key, sizeof (key), "brick%d.inode_size", i);
-                ret = dict_get_str (dict, key, &(status->inode_size));
-                if (ret)
-                        status->inode_size = NULL;
-#endif
-
-                memset (key, 0, sizeof (key));
-                snprintf (key, sizeof (key), "brick%d.total_inodes", i);
-                ret = dict_get_uint64 (dict, key,
-                                       &(status->total_inodes));
-                if (ret)
-                        status->total_inodes = 0;
-
-                memset (key, 0, sizeof (key));
-                snprintf (key, sizeof (key), "brick%d.free_inodes", i);
-                ret = dict_get_uint64 (dict, key, &(status->free_inodes));
-                if (ret) {
-                        ret = 0;
-                        status->free_inodes = 0;
-                }
-
-        } else {
-#ifdef GF_LINUX_HOST_OS
+        memset (key, 0, sizeof (key));
+        snprintf (key, sizeof (key), "brick%d.inode_size", i);
+        ret = dict_get_str (dict, key, &(status->inode_size));
+        if (ret)
                 status->inode_size = NULL;
-#endif
+
+        memset (key, 0, sizeof (key));
+        snprintf (key, sizeof (key), "brick%d.total_inodes", i);
+        ret = dict_get_uint64 (dict, key,
+                        &(status->total_inodes));
+        if (ret)
                 status->total_inodes = 0;
+
+        memset (key, 0, sizeof (key));
+        snprintf (key, sizeof (key), "brick%d.free_inodes", i);
+        ret = dict_get_uint64 (dict, key, &(status->free_inodes));
+        if (ret) {
+                ret = 0;
                 status->free_inodes = 0;
         }
+
 
  out:
         return ret;
@@ -1559,9 +1616,14 @@ cli_print_brick_status (cli_volume_status_t *status)
                         printf ("%s", p);
                         while (num_tabs-- != 0)
                                 printf ("\t");
-                        cli_out ("%d\t%c\t%s",
-                                 status->port, status->online?'Y':'N',
-                                 status->pid_str);
+                        if (status->port)
+                                cli_out ("%d\t%c\t%s",
+                                         status->port, status->online?'Y':'N',
+                                         status->pid_str);
+                        else
+                                cli_out ("%s\t%c\t%s",
+                                         "N/A", status->online?'Y':'N',
+                                         status->pid_str);
                         bricklen = 0;
                 }
         }
@@ -1615,6 +1677,9 @@ out:
         if (options)
                 dict_unref (options);
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -1667,6 +1732,9 @@ out:
                         cli_out ("Volume statedump failed");
         }
 
+        if (frame)
+                STACK_DESTROY (frame->root);
+
         return ret;
 }
 
@@ -1694,6 +1762,9 @@ out:
                 if (sent == 0)
                         cli_out ("Volume list failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 }
@@ -1748,6 +1819,9 @@ out:
                 if ((sent == 0) && (parse_error = 0))
                         cli_out ("Volume clear-locks failed");
         }
+
+        if (frame)
+                STACK_DESTROY (frame->root);
 
         return ret;
 }
@@ -1838,7 +1912,7 @@ struct cli_cmd volume_cmds[] = {
            cli_cmd_volume_top_cbk,
            "volume top operations"},
 
-        { "volume status [all | <VOLNAME> [nfs|<BRICK>]]"
+        { "volume status [all | <VOLNAME> [nfs|shd|<BRICK>]]"
           " [detail|clients|mem|inode|fd|callpool]",
           cli_cmd_volume_status_cbk,
           "display status of all or specified volume(s)/brick"},

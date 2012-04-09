@@ -25,6 +25,9 @@
 struct volume_options options[];
 
 void
+_fd_unref (fd_t *fd);
+
+void
 qr_local_free (qr_local_t *local)
 {
         if (local == NULL) {
@@ -43,6 +46,23 @@ qr_local_free (qr_local_t *local)
 
 out:
         return;
+}
+
+
+qr_local_t *
+qr_local_new (xlator_t *this)
+{
+        qr_local_t *local = NULL;
+
+        local = mem_get0 (this->local_pool);
+        if (local == NULL) {
+                goto out;
+        }
+
+        LOCK_INIT (&local->lock);
+        INIT_LIST_HEAD (&local->fd_list);
+out:
+        return local;
 }
 
 
@@ -150,6 +170,12 @@ qr_fd_ctx_free (qr_fd_ctx_t *qr_fd_ctx)
 
         GF_ASSERT (list_empty (&qr_fd_ctx->waiting_ops));
 
+        LOCK (&qr_fd_ctx->fd->inode->lock);
+        {
+                list_del_init (&qr_fd_ctx->inode_list);
+        }
+        UNLOCK (&qr_fd_ctx->fd->inode->lock);
+
         GF_FREE (qr_fd_ctx->path);
         GF_FREE (qr_fd_ctx);
 
@@ -215,6 +241,7 @@ __qr_inode_alloc (xlator_t *this, char *path, inode_t *inode)
         }
 
         INIT_LIST_HEAD (&qr_inode->lru);
+        INIT_LIST_HEAD (&qr_inode->fd_list);
 
         priority = qr_get_priority (&priv->conf, path);
 
@@ -231,6 +258,8 @@ out:
 void
 __qr_inode_free (qr_inode_t *qr_inode)
 {
+        qr_fd_ctx_t *fdctx  = NULL, *tmp_fdctx  = NULL;
+
         GF_VALIDATE_OR_GOTO ("quick-read", qr_inode, out);
 
         if (qr_inode->xattr) {
@@ -238,6 +267,15 @@ __qr_inode_free (qr_inode_t *qr_inode)
         }
 
         list_del (&qr_inode->lru);
+
+        LOCK (&qr_inode->inode->lock);
+        {
+                list_for_each_entry_safe (fdctx, tmp_fdctx, &qr_inode->fd_list,
+                                          inode_list) {
+                        list_del_init (&fdctx->inode_list);
+                }
+        }
+        UNLOCK (&qr_inode->inode->lock);
 
         GF_FREE (qr_inode);
 out:
@@ -451,7 +489,8 @@ qr_lookup (call_frame_t *frame, xlator_t *this, loc_t *loc,
         }
 
         table = &priv->table;
-        local = mem_get0 (this->local_pool);
+
+        local = qr_local_new (this);
         GF_VALIDATE_OR_GOTO_WITH_ERROR (this->name, local, unwind, op_errno,
                                         ENOMEM);
 
@@ -660,6 +699,9 @@ qr_open (call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
 
         LOCK_INIT (&qr_fd_ctx->lock);
         INIT_LIST_HEAD (&qr_fd_ctx->waiting_ops);
+        INIT_LIST_HEAD (&qr_fd_ctx->inode_list);
+        INIT_LIST_HEAD (&qr_fd_ctx->tmp_list);
+        qr_fd_ctx->fd = fd;
 
         qr_fd_ctx->path = gf_strdup (loc->path);
         if (qr_fd_ctx->path == NULL) {
@@ -683,7 +725,7 @@ qr_open (call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
 
         tmp_fd_ctx = NULL;
 
-        local = mem_get0 (this->local_pool);
+        local = qr_local_new (this);
         if (local == NULL) {
                 op_ret = -1;
                 op_errno = ENOMEM;
@@ -735,7 +777,13 @@ qr_open (call_frame_t *frame, xlator_t *this, loc_t *loc, int32_t flags,
         } else {
                 op_ret = 0;
                 op_errno = 0;
-                goto unwind;
+
+                LOCK (&fd->inode->lock);
+                {
+                        list_add_tail (&qr_fd_ctx->inode_list,
+                                       &qr_inode->fd_list);
+                }
+                UNLOCK (&fd->inode->lock);
         }
 
 unwind:
@@ -917,7 +965,7 @@ qr_validate_cache (call_frame_t *frame, xlator_t *this, fd_t *fd,
         GF_VALIDATE_OR_GOTO (frame->this->name, stub, out);
 
         if (frame->local == NULL) {
-                local = mem_get0 (this->local_pool);
+                local = qr_local_new (this);
                 if (local == NULL) {
                         goto out;
                 }
@@ -1248,7 +1296,8 @@ out:
                                         can_wind = 1;
                                 } else {
                                         if (frame->local == NULL) {
-                                                frame->local = mem_get0 (this->local_pool);
+                                                frame->local
+                                                        = qr_local_new (this);
                                                 if (frame->local == NULL) {
                                                         op_ret = -1;
                                                         op_errno = ENOMEM;
@@ -1435,7 +1484,7 @@ qr_writev (call_frame_t *frame, xlator_t *this, fd_t *fd, struct iovec *vector,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -1588,7 +1637,7 @@ qr_fstat (call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *xdata)
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -1746,7 +1795,7 @@ qr_fsetattr (call_frame_t *frame, xlator_t *this, fd_t *fd,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -1906,7 +1955,7 @@ qr_fsetxattr (call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *dict,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -2069,7 +2118,7 @@ qr_fgetxattr (call_frame_t *frame, xlator_t *this, fd_t *fd, const char *name,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -2210,7 +2259,7 @@ qr_flush (call_frame_t *frame, xlator_t *this, fd_t *fd, dict_t *xdata)
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else if (qr_fd_ctx->open_in_transit) {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -2351,7 +2400,7 @@ qr_fentrylk (call_frame_t *frame, xlator_t *this, const char *volume, fd_t *fd,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -2510,7 +2559,7 @@ qr_finodelk (call_frame_t *frame, xlator_t *this, const char *volume, fd_t *fd,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -2668,7 +2717,7 @@ qr_fsync (call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t flags,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -2865,7 +2914,7 @@ qr_ftruncate (call_frame_t *frame, xlator_t *this, fd_t *fd, off_t offset,
                 qr_fd_ctx = (qr_fd_ctx_t *)(long)value;
         }
 
-        local = mem_get0 (this->local_pool);
+        local = qr_local_new (this);
         if (local == NULL) {
                 op_ret = -1;
                 op_errno = ENOMEM;
@@ -3040,7 +3089,7 @@ qr_lk (call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t cmd,
                         if (qr_fd_ctx->opened) {
                                 can_wind = 1;
                         } else {
-                                frame->local = mem_get0 (this->local_pool);
+                                frame->local = qr_local_new (this);
                                 if (frame->local == NULL) {
                                         op_ret = -1;
                                         op_errno = ENOMEM;
@@ -3097,6 +3146,189 @@ out:
         }
 
 ret:
+        return 0;
+}
+
+
+int32_t
+qr_unlink_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+               int32_t op_ret, int32_t op_errno, struct iatt *preparent,
+               struct iatt *postparent, dict_t *xdata)
+{
+        QR_STACK_UNWIND (unlink, frame, op_ret, op_errno, preparent,
+                         postparent, xdata);
+        return 0;
+}
+
+
+int32_t
+qr_unlink_helper (call_frame_t *frame, xlator_t *this, loc_t *loc, int xflag,
+                  dict_t *xdata)
+{
+        qr_local_t  *local      = NULL;
+        uint32_t     open_count = 0;
+        qr_fd_ctx_t *fdctx      = NULL, *tmp = NULL;
+
+        local = frame->local;
+
+        LOCK (&local->lock);
+        {
+                open_count = --local->open_count;
+        }
+        UNLOCK (&local->lock);
+
+        if (open_count > 0) {
+                goto out;
+        }
+
+        list_for_each_entry_safe (fdctx, tmp, &local->fd_list, tmp_list) {
+                fd_unref (fdctx->fd);
+        }
+
+        STACK_WIND (frame, qr_unlink_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->unlink, loc, xflag, xdata);
+
+out:
+        return 0;
+}
+
+
+int32_t
+qr_unlink (call_frame_t *frame, xlator_t *this, loc_t *loc, int xflag,
+           dict_t *xdata)
+{
+        int32_t           op_errno   = -1, ret = -1, op_ret = -1;
+        uint64_t          value      = 0;
+        struct list_head  fd_list    = {0, };
+        char              need_open  = 0;
+        qr_local_t       *local      = NULL;
+        qr_fd_ctx_t      *fdctx      = NULL, *tmp = NULL;
+        call_frame_t     *open_frame = NULL;
+        call_stub_t      *stub       = NULL;
+        qr_inode_t       *qr_inode   = NULL;
+        uint32_t          open_count = 0;
+        char              ignore     = 0;
+
+        ret = inode_ctx_get (loc->inode, this, &value);
+        if (ret == 0) {
+                qr_inode = (qr_inode_t *)(unsigned long)value;
+        }
+
+        if (qr_inode == NULL) {
+                goto wind;
+        }
+
+        INIT_LIST_HEAD (&fd_list);
+
+        local = qr_local_new (this);
+        GF_VALIDATE_OR_GOTO_WITH_ERROR (this->name, local, unwind, op_errno,
+                                        ENOMEM);
+
+        frame->local = local;
+
+        LOCK (&loc->inode->lock);
+        {
+                list_for_each_entry (fdctx, &qr_inode->fd_list, inode_list) {
+                        __fd_ref (fdctx->fd);
+                        list_add_tail (&fdctx->tmp_list, &fd_list);
+                }
+        }
+        UNLOCK (&loc->inode->lock);
+
+        op_ret = 0;
+
+        LOCK (&local->lock);
+        {
+                list_for_each_entry_safe (fdctx, tmp, &fd_list, tmp_list) {
+                        need_open = 0;
+                        ignore = 0;
+
+                        LOCK (&fdctx->lock);
+                        {
+                                if ((fdctx->opened)
+                                    || (strcmp (loc->path, fdctx->path) != 0)) {
+                                        list_del (&fdctx->tmp_list);
+                                        __fd_unref (fdctx->fd);
+                                        ignore = 1;
+                                        goto unlock;
+                                }
+
+                                if (!(fdctx->opened
+                                      || fdctx->open_in_transit)) {
+                                        need_open = 1;
+                                        fdctx->open_in_transit = 1;
+                                }
+
+                                if (!fdctx->opened) {
+                                        stub = fop_unlink_stub (frame,
+                                                                qr_unlink_helper,
+                                                                loc, xflag,
+                                                                xdata);
+                                        if (stub == NULL) {
+                                                op_ret = -1;
+                                                op_errno = ENOMEM;
+                                                fdctx->open_in_transit = 0;
+                                                goto unlock;
+                                        }
+
+                                        list_add_tail (&stub->list,
+                                                       &fdctx->waiting_ops);
+                                }
+
+                                local->open_count++;
+                        }
+                unlock:
+                        UNLOCK (&fdctx->lock);
+
+                        if (op_ret == -1) {
+                                break;
+                        }
+
+                        if (!need_open && !ignore) {
+                                list_move_tail (&fdctx->tmp_list,
+                                                &local->fd_list);
+                        }
+                }
+
+                open_count = local->open_count;
+        }
+        UNLOCK (&local->lock);
+
+        if (op_ret == -1) {
+                goto unwind;
+        }
+
+        if (open_count == 0) {
+                goto wind;
+        }
+
+        list_for_each_entry_safe (fdctx, tmp, &fd_list, tmp_list) {
+                LOCK (&local->lock);
+                {
+                        list_move_tail (&fdctx->tmp_list, &local->fd_list);
+                }
+                UNLOCK (&local->lock);
+
+                open_frame = create_frame (this, this->ctx->pool);
+                if (open_frame == NULL) {
+                        qr_resume_pending_ops (fdctx, -1, ENOMEM);
+                        continue;
+                }
+
+                STACK_WIND (open_frame, qr_open_cbk, FIRST_CHILD(this),
+                            FIRST_CHILD(this)->fops->open,
+                            loc, fdctx->flags, fdctx->fd, fdctx->xdata);
+        }
+
+        return 0;
+
+unwind:
+        QR_STACK_UNWIND (unlink, frame, -1, op_errno, NULL, NULL, NULL);
+        return 0;
+
+wind:
+        STACK_WIND (frame, qr_unlink_cbk, FIRST_CHILD(this),
+                    FIRST_CHILD(this)->fops->unlink, loc, xflag, xdata);
         return 0;
 }
 
@@ -3658,6 +3890,7 @@ struct xlator_fops fops = {
         .ftruncate   = qr_ftruncate,
         .lk          = qr_lk,
         .fsetattr    = qr_fsetattr,
+        .unlink      = qr_unlink,
 };
 
 struct xlator_cbks cbks = {

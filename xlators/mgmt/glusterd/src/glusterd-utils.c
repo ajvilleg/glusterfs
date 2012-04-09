@@ -21,6 +21,7 @@
 #define _CONFIG_H
 #include "config.h"
 #endif
+#include <openssl/md5.h>
 #include <inttypes.h>
 
 #include "globals.h"
@@ -32,7 +33,6 @@
 #include "timer.h"
 #include "defaults.h"
 #include "compat.h"
-#include "md5.h"
 #include "run.h"
 #include "compat-errno.h"
 #include "statedump.h"
@@ -68,14 +68,29 @@
 #include <sys/sockio.h>
 #endif
 
-#define MOUNT_PROGRAM 100005
-#define NFS_PROGRAM 100003
-#define NFSV3_VERSION 3
-#define MOUNTV3_VERSION 3
-#define MOUNTV1_VERSION 1
+#define NFS_PROGRAM         100003
+#define NFSV3_VERSION       3
+
+#define MOUNT_PROGRAM       100005
+#define MOUNTV3_VERSION     3
+#define MOUNTV1_VERSION     1
+
+#define NLM_PROGRAM         100021
+#define NLMV4_VERSION       4
 
 char    *glusterd_sock_dir = "/tmp";
 static glusterd_lock_t lock;
+
+static void
+md5_wrapper(const unsigned char *data, size_t len, char *md5)
+{
+        unsigned short i = 0;
+        unsigned short lim = MD5_DIGEST_LENGTH*2+1;
+        unsigned char scratch[MD5_DIGEST_LENGTH] = {0,};
+        MD5(data, len, scratch);
+        for (; i < MD5_DIGEST_LENGTH; i++)
+                snprintf(md5 + i * 2, lim-i*2, "%02x", scratch[i]); 
+}
 
 int32_t
 glusterd_get_lock_owner (uuid_t *uuid)
@@ -1032,14 +1047,14 @@ glusterd_set_brick_socket_filepath (glusterd_volinfo_t *volinfo,
 {
         char                    export_path[PATH_MAX] = {0,};
         char                    sock_filepath[PATH_MAX] = {0,};
-        char                    md5_sum[MD5_DIGEST_LEN*2+1] = {0,};
+        char                    md5_sum[MD5_DIGEST_LENGTH*2+1] = {0,};
         char                    volume_dir[PATH_MAX] = {0,};
         xlator_t                *this = NULL;
         glusterd_conf_t         *priv = NULL;
         int                     expected_file_len = 0;
 
         expected_file_len = strlen (glusterd_sock_dir) + strlen ("/") +
-                            MD5_DIGEST_LEN*2 + strlen (".socket") + 1;
+                            MD5_DIGEST_LENGTH*2 + strlen (".socket") + 1;
         GF_ASSERT (len >= expected_file_len);
         this = THIS;
         GF_ASSERT (this);
@@ -1050,9 +1065,7 @@ glusterd_set_brick_socket_filepath (glusterd_volinfo_t *volinfo,
         GLUSTERD_REMOVE_SLASH_FROM_PATH (brickinfo->path, export_path);
         snprintf (sock_filepath, PATH_MAX, "%s/run/%s-%s",
                   volume_dir, brickinfo->hostname, export_path);
-        _get_md5_str (md5_sum, sizeof (md5_sum),
-                              (uint8_t*)sock_filepath, strlen (sock_filepath));
-
+        md5_wrapper ((unsigned char *) sock_filepath, strlen(sock_filepath), md5_sum);
         snprintf (sockpath, len, "%s/%s.socket", glusterd_sock_dir, md5_sum);
 }
 
@@ -1368,6 +1381,96 @@ out:
         return ret;
 }
 
+char **
+glusterd_readin_file (const char *filepath, int *line_count)
+{
+        int         ret                    = -1;
+        int         n                      = 8;
+        int         counter                = 0;
+        char        buffer[PATH_MAX + 256] = {0};
+        char      **lines                  = NULL;
+        FILE       *fp                     = NULL;
+
+        fp = fopen (filepath, "r");
+        if (!fp)
+                goto out;
+
+        lines = GF_CALLOC (1, n * sizeof (*lines), gf_gld_mt_charptr);
+        if (!lines)
+                goto out;
+
+        for (counter = 0; fgets (buffer, sizeof (buffer), fp); counter++) {
+
+                if (counter == n-1) {
+                        n *= 2;
+                        lines = GF_REALLOC (lines, n * sizeof (char *));
+                        if (!lines)
+                                goto out;
+                }
+
+                lines[counter] = gf_strdup (buffer);
+                memset (buffer, 0, sizeof (buffer));
+        }
+
+        lines[counter] = NULL;
+        lines = GF_REALLOC (lines, (counter + 1) * sizeof (char *));
+        if (!lines)
+                goto out;
+
+        *line_count = counter;
+        ret = 0;
+
+ out:
+        if (ret)
+                gf_log (THIS->name, GF_LOG_ERROR, "%s", strerror (errno));
+        if (fp)
+                fclose (fp);
+
+        return lines;
+}
+
+int
+glusterd_compare_lines (const void *a, const void *b) {
+
+        return strcmp(* (char * const *) a, * (char * const *) b);
+}
+
+int
+glusterd_sort_and_redirect (const char *src_filepath, int dest_fd)
+{
+        int            ret          = -1;
+        int            line_count   = 0;
+        int            counter      = 0;
+        char         **lines        = NULL;
+
+
+        if (!src_filepath || dest_fd < 0)
+                goto out;
+
+        lines = glusterd_readin_file (src_filepath, &line_count);
+        if (!lines)
+                goto out;
+
+        qsort (lines, line_count, sizeof (*lines), glusterd_compare_lines);
+
+        for (counter = 0; lines[counter]; counter++) {
+
+                ret = write (dest_fd, lines[counter],
+                             strlen (lines[counter]));
+                if (ret < 0)
+                        goto out;
+
+                GF_FREE (lines[counter]);
+        }
+
+        ret = 0;
+ out:
+        if (lines)
+                GF_FREE (lines);
+
+        return ret;
+}
+
 int
 glusterd_volume_compute_cksum (glusterd_volinfo_t  *volinfo)
 {
@@ -1382,10 +1485,10 @@ glusterd_volume_compute_cksum (glusterd_volinfo_t  *volinfo)
         char                    sort_filepath[PATH_MAX] = {0};
         gf_boolean_t            unlink_sortfile = _gf_false;
         int                     sort_fd = 0;
-        runner_t                runner;
+        xlator_t               *this = NULL;
 
         GF_ASSERT (volinfo);
-
+        this = THIS;
         priv = THIS->private;
         GF_ASSERT (priv);
 
@@ -1397,7 +1500,7 @@ glusterd_volume_compute_cksum (glusterd_volinfo_t  *volinfo)
         fd = open (cksum_path, O_RDWR | O_APPEND | O_CREAT| O_TRUNC, 0600);
 
         if (-1 == fd) {
-                gf_log (THIS->name, GF_LOG_ERROR, "Unable to open %s, errno: %d",
+                gf_log (this->name, GF_LOG_ERROR, "Unable to open %s, errno: %d",
                         cksum_path, errno);
                 ret = -1;
                 goto out;
@@ -1407,9 +1510,10 @@ glusterd_volume_compute_cksum (glusterd_volinfo_t  *volinfo)
                   GLUSTERD_VOLUME_INFO_FILE);
         snprintf (sort_filepath, sizeof (sort_filepath), "/tmp/%s.XXXXXX",
                   volinfo->volname);
+
         sort_fd = mkstemp (sort_filepath);
         if (sort_fd < 0) {
-                gf_log (THIS->name, GF_LOG_ERROR, "Could not generate temp file, "
+                gf_log (this->name, GF_LOG_ERROR, "Could not generate temp file, "
                         "reason: %s for volume: %s", strerror (errno),
                         volinfo->volname);
                 goto out;
@@ -1418,21 +1522,21 @@ glusterd_volume_compute_cksum (glusterd_volinfo_t  *volinfo)
         }
 
         /* sort the info file, result in sort_filepath */
-        runinit (&runner);
-        runner_add_args (&runner, "sort", filepath, NULL);
-        runner_redir (&runner, STDOUT_FILENO, sort_fd);
 
-        ret = runner_run (&runner);
-        close (sort_fd);
+        ret = glusterd_sort_and_redirect (filepath, sort_fd);
         if (ret) {
-                gf_log (THIS->name, GF_LOG_ERROR, "failed to sort file %s to %s",
-                        filepath, sort_filepath);
+                gf_log (this->name, GF_LOG_ERROR, "sorting info file failed");
                 goto out;
         }
+
+        ret = close (sort_fd);
+        if (ret)
+                goto out;
+
         ret = get_checksum_for_path (sort_filepath, &cksum);
 
         if (ret) {
-                gf_log (THIS->name, GF_LOG_ERROR, "Unable to get checksum"
+                gf_log (this->name, GF_LOG_ERROR, "Unable to get checksum"
                         " for path: %s", sort_filepath);
                 goto out;
         }
@@ -1457,7 +1561,7 @@ out:
                close (fd);
         if (unlink_sortfile)
                unlink (sort_filepath);
-        gf_log (THIS->name, GF_LOG_DEBUG, "Returning with %d", ret);
+        gf_log (this->name, GF_LOG_DEBUG, "Returning with %d", ret);
 
         return ret;
 }
@@ -1488,29 +1592,26 @@ _add_volinfo_dict_to_prdict (dict_t *this, char *key, data_t *value, void *data)
 }
 
 int32_t
-glusterd_add_bricks_hname_path_to_dict (dict_t *dict)
+glusterd_add_bricks_hname_path_to_dict (dict_t *dict,
+                                        glusterd_volinfo_t *volinfo)
 {
-        char                    *volname = NULL;
-        glusterd_volinfo_t      *volinfo = NULL;
         glusterd_brickinfo_t    *brickinfo = NULL;
         int                     ret = 0;
         char                    key[256] = {0};
         int                     index = 0;
 
-        ret = dict_get_str (dict, "volname", &volname);
-        if (ret) {
-                gf_log ("", GF_LOG_ERROR, "Unable to get volume name");
-                goto out;
-        }
 
-        ret  = glusterd_volinfo_find (volname, &volinfo);
-        if (ret)
-                goto out;
         list_for_each_entry (brickinfo, &volinfo->bricks, brick_list) {
                 snprintf (key, sizeof (key), "%d-hostname", index);
                 ret = dict_set_str (dict, key, brickinfo->hostname);
+                if (ret)
+                        goto out;
+
                 snprintf (key, sizeof (key), "%d-path", index);
                 ret = dict_set_str (dict, key, brickinfo->path);
+                if (ret)
+                        goto out;
+
                 index++;
         }
 out:
@@ -2586,12 +2687,11 @@ glusterd_nodesvc_set_socket_filepath (char *rundir, uuid_t uuid,
                                       char *socketpath, int len)
 {
         char                    sockfilepath[PATH_MAX] = {0,};
-        char                    md5_str[PATH_MAX] = {0,};
+        char                    md5_str[MD5_DIGEST_LENGTH*2+1] = {0,};
 
         snprintf (sockfilepath, sizeof (sockfilepath), "%s/run-%s",
                   rundir, uuid_utoa (uuid));
-        _get_md5_str (md5_str, sizeof (md5_str),
-                      (uint8_t *)sockfilepath, sizeof (sockfilepath));
+        md5_wrapper ((unsigned char *) sockfilepath, strlen (sockfilepath), md5_str);
         snprintf (socketpath, len, "%s/%s.socket", glusterd_sock_dir,
                   md5_str);
         return 0;
@@ -2708,6 +2808,7 @@ glusterd_nodesvc_start (char *server)
         char                    rundir[PATH_MAX]           = {0,};
         char                    sockfpath[PATH_MAX] = {0,};
         char                    volfileid[256]             = {0};
+        char                    glusterd_uuid_option[1024] = {0};
 #ifdef DEBUG
         char                    valgrind_logfile[PATH_MAX] = {0};
 #endif
@@ -2767,6 +2868,12 @@ glusterd_nodesvc_start (char *server)
                          "-l", logfile,
                          "-S", sockfpath, NULL);
 
+        if (!strcmp (server, "glustershd")) {
+                snprintf (glusterd_uuid_option, sizeof (glusterd_uuid_option),
+                          "*replicate*.node-uuid=%s", uuid_utoa (priv->uuid));
+                runner_add_args (&runner, "--xlator-option",
+                                 glusterd_uuid_option, NULL);
+        }
         runner_log (&runner, "", GF_LOG_DEBUG,
                     "Starting the nfs/glustershd services");
 
@@ -2835,6 +2942,11 @@ glusterd_nfs_pmap_deregister ()
         else
                 gf_log ("", GF_LOG_ERROR, "De-register NFSV3 is unsuccessful");
 
+        if (pmap_unset (NLM_PROGRAM, NLMV4_VERSION))
+                gf_log ("", GF_LOG_INFO, "De-registered NLM v4 successfully");
+        else
+                gf_log ("", GF_LOG_ERROR, "De-registration of NLM v4 failed");
+
 }
 
 int
@@ -2860,32 +2972,36 @@ glusterd_shd_stop ()
         return glusterd_nodesvc_stop ("glustershd", SIGTERM);
 }
 
-/* Only NFS server for now */
 int
-glusterd_add_node_to_dict (char *server, dict_t *dict, int count)
+glusterd_add_node_to_dict (char *server, dict_t *dict, int count,
+                           dict_t *vol_opts)
 {
         int                     ret = -1;
         glusterd_conf_t         *priv = THIS->private;
         char                    pidfile[PATH_MAX] = {0,};
         gf_boolean_t            running = _gf_false;
         int                     pid = -1;
+        int                     port = 0;
         char                    key[1024] = {0,};
 
         glusterd_get_nodesvc_pidfile (server, priv->workdir, pidfile,
                                       sizeof (pidfile));
         running = glusterd_is_service_running (pidfile, &pid);
 
-        /* For nfs servers setting
-         * brick<n>.hostname = "NFS server"
+        /* For nfs-servers/self-heal-daemon setting
+         * brick<n>.hostname = "NFS Server" / "Self-heal Daemon"
          * brick<n>.path = uuid
          * brick<n>.port = 0
          *
-         * This might be confusing, but cli display's the name of
+         * This might be confusing, but cli displays the name of
          * the brick as hostname+path, so this will make more sense
          * when output.
          */
         snprintf (key, sizeof (key), "brick%d.hostname", count);
-        ret = dict_set_str (dict, key, "NFS Server");
+        if (!strcmp (server, "nfs"))
+                ret = dict_set_str (dict, key, "NFS Server");
+        else if (!strcmp (server, "glustershd"))
+                ret = dict_set_str (dict, key, "Self-heal Daemon");
         if (ret)
                 goto out;
 
@@ -2897,7 +3013,19 @@ glusterd_add_node_to_dict (char *server, dict_t *dict, int count)
 
         memset (key, 0, sizeof (key));
         snprintf (key, sizeof (key), "brick%d.port", count);
-        ret = dict_set_int32 (dict, key, 0);
+        /* Port is available only for the NFS server.
+         * Self-heal daemon doesn't provide any port for access
+         * by entities other than gluster.
+         */
+        if (!strcmp (server, "nfs")) {
+                if (dict_get (vol_opts, "nfs.port")) {
+                        ret = dict_get_int32 (vol_opts, "nfs.port", &port);
+                        if (ret)
+                                goto out;
+                } else
+                        port = GF_NFS3_PORT;
+        }
+        ret = dict_set_int32 (dict, key, port);
         if (ret)
                 goto out;
 
@@ -3442,17 +3570,40 @@ glusterd_get_brick_root (char *path, char **mount_point)
         return -1;
 }
 
+static char*
+glusterd_parse_inode_size (char *stream, char *pattern)
+{
+        char *needle = NULL;
+        char *trail  = NULL;
+
+        needle = strstr (stream, pattern);
+        if (!needle)
+                goto out;
+
+        needle = nwstrtail (needle, pattern);
+
+        trail = needle;
+        while (trail && isdigit (*trail)) trail++;
+        if (trail)
+                *trail = '\0';
+
+out:
+        return needle;
+}
+
 static int
 glusterd_add_inode_size_to_dict (dict_t *dict, int count)
 {
         int             ret               = -1;
-        int             fd                = -1;
         char            key[1024]         = {0};
         char            buffer[4096]      = {0};
-        char            cmd_str[4096]     = {0};
         char           *inode_size        = NULL;
         char           *device            = NULL;
         char           *fs_name           = NULL;
+        char           *cur_word          = NULL;
+        char           *pattern           = NULL;
+        char           *trail             = NULL;
+        runner_t        runner            = {0, };
 
         memset (key, 0, sizeof (key));
         snprintf (key, sizeof (key), "brick%d.device", count);
@@ -3466,26 +3617,18 @@ glusterd_add_inode_size_to_dict (dict_t *dict, int count)
         if (ret)
                 goto out;
 
+        runinit (&runner);
+        runner_redir (&runner, STDOUT_FILENO, RUN_PIPE);
         /* get inode size for xfs or ext2/3/4 */
         if (!strcmp (fs_name, "xfs")) {
 
-                snprintf (cmd_str, sizeof (cmd_str),
-                          "xfs_info %s | "
-                          "grep isize | "
-                          "cut -d ' ' -f 2-  | "
-                          "cut -d '=' -f 2 | "
-                          "cut -d ' ' -f 1 "
-                          "> /tmp/gf_status.txt ",
-                          device);
+                runner_add_args (&runner, "xfs_info", device, NULL);
+                pattern = "isize=";
 
         } else if (IS_EXT_FS(fs_name)) {
 
-                snprintf (cmd_str, sizeof (cmd_str),
-                          "tune2fs -l %s | "
-                          "grep -i 'inode size' | "
-                          "awk '{print $3}' "
-                          "> /tmp/gf_status.txt ",
-                          device);
+                runner_add_args (&runner, "tune2fs", "-l", device, NULL);
+                pattern = "Inode size:";
 
         } else {
                 ret = 0;
@@ -3495,7 +3638,7 @@ glusterd_add_inode_size_to_dict (dict_t *dict, int count)
                 goto out;
         }
 
-        ret = runcmd ("/bin/sh", "-c", cmd_str, NULL);
+        ret = runner_start (&runner);
         if (ret) {
                 gf_log (THIS->name, GF_LOG_ERROR, "could not get inode "
                         "size for %s : %s package missing", fs_name,
@@ -3504,33 +3647,42 @@ glusterd_add_inode_size_to_dict (dict_t *dict, int count)
                 goto out;
         }
 
-        fd = open ("/tmp/gf_status.txt", O_RDONLY);
-        unlink ("/tmp/gf_status.txt");
-        if (fd < 0) {
-                ret = -1;
+        for (;;) {
+                if (fgets (buffer, sizeof (buffer),
+                    runner_chio (&runner, STDOUT_FILENO)) == NULL)
+                        break;
+                trail = strrchr (buffer, '\n');
+                if (trail)
+                        *trail = '\0';
+
+                cur_word = glusterd_parse_inode_size (buffer, pattern);
+                if (cur_word)
+                        break;
+        }
+
+        ret = runner_end (&runner);
+        if (ret) {
+                gf_log (THIS->name, GF_LOG_ERROR, "%s exited with non-zero "
+                        "exit status", ((!strcmp (fs_name, "xfs")) ?
+                        "xfs_info" : "tune2fs"));
                 goto out;
         }
-        memset (buffer, 0, sizeof (buffer));
-        ret = read (fd, buffer, sizeof (buffer));
-        if (ret < 2) {
+        if (!cur_word) {
                 ret = -1;
+                gf_log (THIS->name, GF_LOG_ERROR, "Unable to retrieve inode "
+                        "size using %s",
+                        (!strcmp (fs_name, "xfs")? "xfs_info": "tune2fs"));
                 goto out;
         }
+
+        inode_size = gf_strdup (cur_word);
 
         memset (key, 0, sizeof (key));
         snprintf (key, sizeof (key), "brick%d.inode_size", count);
 
-        inode_size = get_nth_word (buffer, 1);
-        if (!inode_size) {
-                ret = -1;
-                goto out;
-        }
-
         ret = dict_set_dynstr (dict, key, inode_size);
 
  out:
-        if (fd >= 0)
-                close (fd);
         if (ret)
                 gf_log (THIS->name, GF_LOG_ERROR, "failed to get inode size");
         return ret;
@@ -3556,7 +3708,7 @@ glusterd_add_brick_mount_details (glusterd_brickinfo_t *brickinfo,
         if (ret)
                 goto out;
 
-        mtab = setmntent (_PATH_MNTTAB, "r");
+        mtab = setmntent (_PATH_MOUNTED, "r");
         entry = getmntent (mtab);
 
         while (1) {

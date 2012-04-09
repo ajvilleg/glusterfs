@@ -105,6 +105,7 @@ typedef struct afr_self_heald_ {
         eh_t             *healed;
         eh_t             *heal_failed;
         eh_t             *split_brain;
+        char             *node_uuid;
 } afr_self_heald_t;
 
 typedef struct _afr_private {
@@ -192,7 +193,7 @@ typedef struct {
            background, this function will be called as soon as possible. */
 
         int (*unwind) (call_frame_t *frame, xlator_t *this, int32_t op_ret,
-                       int32_t op_errno);
+                       int32_t op_errno, int32_t sh_failed);
 
         /* End of external interface members */
 
@@ -262,6 +263,7 @@ typedef struct {
 
         afr_sh_algo_private_t *private;
 
+        struct afr_sh_algorithm  *algo;
         afr_lock_cbk_t data_lock_success_handler;
         afr_lock_cbk_t data_lock_failure_handler;
         int (*completion_cbk) (call_frame_t *frame, xlator_t *this);
@@ -1016,7 +1018,8 @@ afr_launch_self_heal (call_frame_t *frame, xlator_t *this, inode_t *inode,
                       void (*gfid_sh_success_cbk) (call_frame_t *sh_frame,
                                                    xlator_t *this),
                       int (*unwind) (call_frame_t *frame, xlator_t *this,
-                                     int32_t op_ret, int32_t op_errno));
+                                     int32_t op_ret, int32_t op_errno,
+                                     int32_t sh_failed));
 int
 afr_fix_open (call_frame_t *frame, xlator_t *this, afr_fd_ctx_t *fd_ctx,
               int need_open_count, int *need_open);

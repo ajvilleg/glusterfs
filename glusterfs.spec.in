@@ -48,11 +48,12 @@ Requires(postun): /sbin/service
 
 BuildRequires: bison flex
 BuildRequires: gcc make automake libtool
-BuildRequires: ncurses-devel readline-devel
+BuildRequires: ncurses-devel readline-devel openssl-devel
 BuildRequires: python-ctypes
 %if 0%{?suse_version}
 BuildRequires: python-devel
 %endif
+Requires: openssl
 
 Obsoletes:        %{name}-libs <= 2.0.0
 Obsoletes:        %{name}-common < %{version}-%{release}
@@ -139,6 +140,7 @@ Summary:          Clustered file-system server
 Group:            System Environment/Daemons
 Requires:         %{name} = %{version}-%{release}
 Requires:         %{name}-fuse = %{version}-%{release}
+Requires:         openssl
 
 %description server
 GlusterFS is a clustered file-system capable of scaling to several
@@ -296,9 +298,12 @@ if [ -d /etc/glusterd ]; then
 fi
 
 if [ -d /var/lib/glusterd/vols ]; then
-    #for each dir under vols, backup non-fuse .vol files  as .Vol.old
-    for file in `find /var/lib/glusterd/vols -type f ! -name *-fuse.vol `; do
-        grep ".vol" $file &> /dev/null && fname=`basename $file .vol` && dname=`dirname $file` && cp $file $dname/$fname.Vol.old
+    # Rename old volfiles in an RPM-standard way.  These aren't actually
+    # considered package config files, so %config doesn't work for them.
+    for file in $(find /var/lib/glusterd/vols -name '*.vol'); do
+        newfile=${file}.rpmsave
+        echo "warning: ${file} saved as ${newfile}"
+        cp ${file} ${newfile}
     done
 fi
 

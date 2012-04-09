@@ -947,8 +947,10 @@ gf_cli3_1_stop_volume_cbk (struct rpc_req *req, struct iovec *iov,
 
         frame = myframe;
 
-        if (frame)
+        if (frame) {
                 local = frame->local;
+                frame->local = NULL;
+        }
 
         if (local) {
                 dict = local->dict;
@@ -988,6 +990,7 @@ out:
                 free (rsp.dict.dict_val);
         if (local)
                 cli_local_wipe (local);
+
         return ret;
 }
 
@@ -1027,8 +1030,10 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
 
         frame = myframe;
 
-        if (frame)
+        if (frame) {
                 local = frame->local;
+                frame->local = NULL;
+        }
 
         if (local) {
                 local_dict = local->dict;
@@ -1552,6 +1557,9 @@ gf_cli3_1_remove_brick_cbk (struct rpc_req *req, struct iovec *iov,
         gf_cli_rsp                      rsp   = {0,};
         int                             ret   = -1;
         char                            msg[1024] = {0,};
+        gf1_op_commands                 cmd = GF_OP_CMD_NONE;
+        dict_t                         *dict = NULL;
+        char                           *cmd_str = "unknown";
 
         if (-1 == req->rpc_status) {
                 goto out;
@@ -1563,12 +1571,47 @@ gf_cli3_1_remove_brick_cbk (struct rpc_req *req, struct iovec *iov,
                 goto out;
         }
 
+        dict = dict_new ();
+
+        ret = dict_unserialize (rsp.dict.dict_val, rsp.dict.dict_len, &dict);
+        if (ret) {
+                gf_log ("", GF_LOG_ERROR, "failed to unserialize rsp to dict");
+                goto out;
+        }
+        ret = dict_get_int32 (dict, "command", (int32_t *)&cmd);
+        if (ret) {
+                 gf_log ("", GF_LOG_ERROR, "failed to get command");
+                 goto out;
+        }
+
+        switch (cmd) {
+
+        case GF_OP_CMD_START:
+                cmd_str = "start";
+                break;
+        case GF_OP_CMD_COMMIT:
+                cmd_str = "commit";
+                break;
+        case GF_OP_CMD_ABORT:
+                cmd_str = "abort";
+                break;
+        case GF_OP_CMD_PAUSE:
+                cmd_str = "pause";
+                break;
+        case GF_OP_CMD_COMMIT_FORCE:
+                cmd_str = "commit force";
+                break;
+        default:
+                cmd_str = "unkown";
+                break;
+        }
+
         gf_log ("cli", GF_LOG_INFO, "Received resp to remove brick");
 
         if (rsp.op_ret && strcmp (rsp.op_errstr, ""))
                 snprintf (msg, sizeof (msg), "%s", rsp.op_errstr);
         else
-                snprintf (msg, sizeof (msg), "Remove Brick %s",
+                snprintf (msg, sizeof (msg), "Remove Brick %s %s", cmd_str,
                           (rsp.op_ret) ? "unsuccessful": "successful");
 
 #if (HAVE_LIB_XML)
@@ -1590,6 +1633,9 @@ out:
                 free (rsp.dict.dict_val);
         if (rsp.op_errstr)
                 free (rsp.op_errstr);
+        if (dict)
+                dict_unref(dict);
+
         return ret;
 }
 
@@ -1742,6 +1788,9 @@ gf_cli3_1_replace_brick_cbk (struct rpc_req *req, struct iovec *iov,
         ret = rsp.op_ret;
 
 out:
+        if (frame)
+                frame->local = NULL;
+
         if (local) {
                 dict_unref (local->dict);
                 cli_local_wipe (local);
@@ -2951,8 +3000,8 @@ gf_cli3_1_replace_brick (call_frame_t *frame, xlator_t *this,
                 goto out;
         }
 
-        local->dict                 = dict_ref (dict);
-        frame->local                = local;
+        local->dict  = dict_ref (dict);
+        frame->local = local;
 
         ret = dict_get_int32 (dict, "operation", &op);
         if (ret) {
@@ -4308,7 +4357,7 @@ out:
 }
 
 void
-cli_print_volume_status_mem (dict_t *dict, gf_boolean_t nfs)
+cli_print_volume_status_mem (dict_t *dict, gf_boolean_t notbrick)
 {
         int             ret = -1;
         char            *volname = NULL;
@@ -4316,7 +4365,9 @@ cli_print_volume_status_mem (dict_t *dict, gf_boolean_t nfs)
         char            *path = NULL;
         int             online = -1;
         char            key[1024] = {0,};
-        int             brick_count = 0;
+        int             brick_index_max = -1;
+        int             other_count = 0;
+        int             index_max = 0;
         int             val = 0;
         int             i = 0;
 
@@ -4327,24 +4378,29 @@ cli_print_volume_status_mem (dict_t *dict, gf_boolean_t nfs)
                 goto out;
         cli_out ("Memory status for volume : %s", volname);
 
-        ret = dict_get_int32 (dict, "count", &brick_count);
+        ret = dict_get_int32 (dict, "brick-index-max", &brick_index_max);
+        if (ret)
+                goto out;
+        ret = dict_get_int32 (dict, "other-count", &other_count);
         if (ret)
                 goto out;
 
-        for (i = 0; i < brick_count; i++) {
+        index_max = brick_index_max + other_count;
+
+        for (i = 0; i <= index_max; i++) {
                 cli_out ("----------------------------------------------");
 
                 memset (key, 0, sizeof (key));
                 snprintf (key, sizeof (key), "brick%d.hostname", i);
                 ret = dict_get_str (dict, key, &hostname);
                 if (ret)
-                        goto out;
+                        continue;
                 memset (key, 0, sizeof (key));
                 snprintf (key, sizeof (key), "brick%d.path", i);
                 ret = dict_get_str (dict, key, &path);
                 if (ret)
-                        goto out;
-                if (nfs)
+                        continue;
+                if (notbrick)
                         cli_out ("%s : %s", hostname, path);
                 else
                         cli_out ("Brick : %s:%s", hostname, path);
@@ -4355,7 +4411,10 @@ cli_print_volume_status_mem (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
                 if (!online) {
-                        cli_out ("Brick is offline");
+                        if (notbrick)
+                                cli_out ("%s is offline", hostname);
+                        else
+                                cli_out ("Brick is offline");
                         continue;
                 }
 
@@ -4442,11 +4501,13 @@ out:
 }
 
 void
-cli_print_volume_status_clients (dict_t *dict, gf_boolean_t nfs)
+cli_print_volume_status_clients (dict_t *dict, gf_boolean_t notbrick)
 {
         int             ret = -1;
         char            *volname = NULL;
-        int             brick_count = 0;
+        int             brick_index_max = -1;
+        int             other_count = 0;
+        int             index_max = 0;
         char            *hostname = NULL;
         char            *path = NULL;
         int             online = -1;
@@ -4465,11 +4526,16 @@ cli_print_volume_status_clients (dict_t *dict, gf_boolean_t nfs)
                 goto out;
         cli_out ("Client connections for volume %s", volname);
 
-        ret = dict_get_int32 (dict, "count", &brick_count);
+        ret = dict_get_int32 (dict, "brick-index-max", &brick_index_max);
+        if (ret)
+                goto out;
+        ret = dict_get_int32 (dict, "other-count", &other_count);
         if (ret)
                 goto out;
 
-        for ( i = 0; i < brick_count; i++) {
+        index_max = brick_index_max + other_count;
+
+        for (i = 0; i <= index_max; i++) {
                 cli_out ("----------------------------------------------");
 
                 memset (key, 0, sizeof (key));
@@ -4483,7 +4549,7 @@ cli_print_volume_status_clients (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
 
-                if (nfs)
+                if (notbrick)
                         cli_out ("%s : %s", hostname, path);
                 else
                         cli_out ("Brick : %s:%s", hostname, path);
@@ -4494,7 +4560,10 @@ cli_print_volume_status_clients (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
                 if (!online) {
-                        cli_out ("Brick is offline");
+                        if (notbrick)
+                                cli_out ("%s is offline", hostname);
+                        else
+                                cli_out ("Brick is offline");
                         continue;
                 }
 
@@ -4690,11 +4759,13 @@ out:
 }
 
 void
-cli_print_volume_status_inode (dict_t *dict, gf_boolean_t nfs)
+cli_print_volume_status_inode (dict_t *dict, gf_boolean_t notbrick)
 {
         int             ret = -1;
         char            *volname = NULL;
-        int             brick_count = 0;
+        int             brick_index_max = -1;
+        int             other_count = 0;
+        int             index_max = 0;
         char            *hostname = NULL;
         char            *path = NULL;
         int             online = -1;
@@ -4710,11 +4781,16 @@ cli_print_volume_status_inode (dict_t *dict, gf_boolean_t nfs)
                 goto out;
         cli_out ("Inode tables for volume %s", volname);
 
-        ret = dict_get_int32 (dict, "count", &brick_count);
+        ret = dict_get_int32 (dict, "brick-index-max", &brick_index_max);
+        if (ret)
+                goto out;
+        ret = dict_get_int32 (dict, "other-count", &other_count);
         if (ret)
                 goto out;
 
-        for (i = 0; i < brick_count; i++) {
+        index_max = brick_index_max + other_count;
+
+        for ( i = 0; i <= index_max; i++) {
                 cli_out ("----------------------------------------------");
 
                 memset (key, 0, sizeof (key));
@@ -4727,7 +4803,7 @@ cli_print_volume_status_inode (dict_t *dict, gf_boolean_t nfs)
                 ret = dict_get_str (dict, key, &path);
                 if (ret)
                         goto out;
-                if (nfs)
+                if (notbrick)
                         cli_out ("%s : %s", hostname, path);
                 else
                         cli_out ("Brick : %s:%s", hostname, path);
@@ -4738,7 +4814,10 @@ cli_print_volume_status_inode (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
                 if (!online) {
-                        cli_out ("Brick is offline");
+                        if (notbrick)
+                                cli_out ("%s is offline", hostname);
+                        else
+                                cli_out ("Brick is offline");
                         continue;
                 }
 
@@ -4846,11 +4925,13 @@ out:
 }
 
 void
-cli_print_volume_status_fd (dict_t *dict, gf_boolean_t nfs)
+cli_print_volume_status_fd (dict_t *dict, gf_boolean_t notbrick)
 {
         int             ret = -1;
         char            *volname = NULL;
-        int             brick_count = 0;
+        int             brick_index_max = -1;
+        int             other_count = 0;
+        int             index_max = 0;
         char            *hostname = NULL;
         char            *path = NULL;
         int             online = -1;
@@ -4866,11 +4947,16 @@ cli_print_volume_status_fd (dict_t *dict, gf_boolean_t nfs)
                 goto out;
         cli_out ("FD tables for volume %s", volname);
 
-        ret = dict_get_int32 (dict, "count", &brick_count);
+        ret = dict_get_int32 (dict, "brick-index-max", &brick_index_max);
+        if (ret)
+                goto out;
+        ret = dict_get_int32 (dict, "other-count", &other_count);
         if (ret)
                 goto out;
 
-        for (i = 0; i < brick_count; i++) {
+        index_max = brick_index_max + other_count;
+
+        for (i = 0; i <= index_max; i++) {
                 cli_out ("----------------------------------------------");
 
                 memset (key, 0, sizeof (key));
@@ -4884,7 +4970,7 @@ cli_print_volume_status_fd (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
 
-                if (nfs)
+                if (notbrick)
                         cli_out ("%s : %s", hostname, path);
                 else
                         cli_out ("Brick : %s:%s", hostname, path);
@@ -4895,7 +4981,10 @@ cli_print_volume_status_fd (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
                 if (!online) {
-                        cli_out ("Brick is offline");
+                        if (notbrick)
+                                cli_out ("%s is offline", hostname);
+                        else
+                                cli_out ("Brick is offline");
                         continue;
                 }
 
@@ -5064,11 +5153,13 @@ cli_print_volume_status_call_stack (dict_t *dict, char *prefix)
 }
 
 void
-cli_print_volume_status_callpool (dict_t *dict, gf_boolean_t nfs)
+cli_print_volume_status_callpool (dict_t *dict, gf_boolean_t notbrick)
 {
         int             ret = -1;
         char            *volname = NULL;
-        int             brick_count = 0;
+        int             brick_index_max = -1;
+        int             other_count = 0;
+        int             index_max = 0;
         char            *hostname = NULL;
         char            *path = NULL;
         int             online = -1;
@@ -5084,11 +5175,16 @@ cli_print_volume_status_callpool (dict_t *dict, gf_boolean_t nfs)
                 goto out;
         cli_out ("Pending calls for volume %s", volname);
 
-        ret = dict_get_int32 (dict, "count", &brick_count);
+        ret = dict_get_int32 (dict, "brick-index-max", &brick_index_max);
+        if (ret)
+                goto out;
+        ret = dict_get_int32 (dict, "other-count", &other_count);
         if (ret)
                 goto out;
 
-        for (i = 0; i < brick_count; i++) {
+        index_max = brick_index_max + other_count;
+
+        for (i = 0; i <= index_max; i++) {
                 cli_out ("----------------------------------------------");
 
                 memset (key, 0, sizeof (key));
@@ -5102,7 +5198,7 @@ cli_print_volume_status_callpool (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
 
-                if (nfs)
+                if (notbrick)
                         cli_out ("%s : %s", hostname, path);
                 else
                         cli_out ("Brick : %s:%s", hostname, path);
@@ -5113,7 +5209,10 @@ cli_print_volume_status_callpool (dict_t *dict, gf_boolean_t nfs)
                 if (ret)
                         goto out;
                 if (!online) {
-                        cli_out ("Brick is offline");
+                        if (notbrick)
+                                cli_out ("%s is offline", hostname);
+                        else
+                                cli_out ("Brick is offline");
                         continue;
                 }
 
@@ -5146,18 +5245,21 @@ static int
 gf_cli3_1_status_cbk (struct rpc_req *req, struct iovec *iov,
                       int count, void *myframe)
 {
-        int                             ret            = -1;
-        int                             i              = 0;
-        int                             pid            = -1;
-        uint32_t                        cmd            = 0;
-        gf_boolean_t                    nfs            = _gf_false;
-        char                            key[1024]      = {0,};
-        char                           *hostname       = NULL;
-        char                           *path           = NULL;
-        char                           *volname        = NULL;
-        dict_t                         *dict           = NULL;
-        gf_cli_rsp                      rsp            = {0,};
-        cli_volume_status_t             status         = {0};
+        int                             ret             = -1;
+        int                             brick_index_max = -1;
+        int                             other_count     = 0;
+        int                             index_max       = 0;
+        int                             i               = 0;
+        int                             pid             = -1;
+        uint32_t                        cmd             = 0;
+        gf_boolean_t                    notbrick        = _gf_false;
+        char                            key[1024]       = {0,};
+        char                           *hostname        = NULL;
+        char                           *path            = NULL;
+        char                           *volname         = NULL;
+        dict_t                         *dict            = NULL;
+        gf_cli_rsp                      rsp             = {0,};
+        cli_volume_status_t             status          = {0};
 
         if (req->rpc_status == -1)
                 goto out;
@@ -5195,8 +5297,8 @@ gf_cli3_1_status_cbk (struct rpc_req *req, struct iovec *iov,
                 goto out;
         }
 
-        if (cmd & GF_CLI_STATUS_NFS)
-                nfs = _gf_true;
+        if ((cmd & GF_CLI_STATUS_NFS) || (cmd & GF_CLI_STATUS_SHD))
+                notbrick = _gf_true;
 
         ret = dict_get_int32 (dict, "count", &count);
         if (ret)
@@ -5205,6 +5307,15 @@ gf_cli3_1_status_cbk (struct rpc_req *req, struct iovec *iov,
                 ret = -1;
                 goto out;
         }
+
+        ret = dict_get_int32 (dict, "brick-index-max", &brick_index_max);
+        if (ret)
+                goto out;
+        ret = dict_get_int32 (dict, "other-count", &other_count);
+        if (ret)
+                goto out;
+
+        index_max = brick_index_max + other_count;
 
 #if (HAVE_LIB_XML)
         if (global_state->mode & GLUSTER_MODE_XML) {
@@ -5222,23 +5333,23 @@ gf_cli3_1_status_cbk (struct rpc_req *req, struct iovec *iov,
 
         switch (cmd & GF_CLI_STATUS_MASK) {
                 case GF_CLI_STATUS_MEM:
-                        cli_print_volume_status_mem (dict, nfs);
+                        cli_print_volume_status_mem (dict, notbrick);
                         goto cont;
                         break;
                 case GF_CLI_STATUS_CLIENTS:
-                        cli_print_volume_status_clients (dict, nfs);
+                        cli_print_volume_status_clients (dict, notbrick);
                         goto cont;
                         break;
                 case GF_CLI_STATUS_INODE:
-                        cli_print_volume_status_inode (dict, nfs);
+                        cli_print_volume_status_inode (dict, notbrick);
                         goto cont;
                         break;
                 case GF_CLI_STATUS_FD:
-                        cli_print_volume_status_fd (dict, nfs);
+                        cli_print_volume_status_fd (dict, notbrick);
                         goto cont;
                         break;
                 case GF_CLI_STATUS_CALLPOOL:
-                        cli_print_volume_status_callpool (dict, nfs);
+                        cli_print_volume_status_callpool (dict, notbrick);
                         goto cont;
                         break;
                 default:
@@ -5252,46 +5363,54 @@ gf_cli3_1_status_cbk (struct rpc_req *req, struct iovec *iov,
         cli_out ("\nStatus of volume: %s", volname);
 
         if ((cmd & GF_CLI_STATUS_DETAIL) == 0) {
-                cli_out ("Brick\t\t\t\t\t\t\tPort\tOnline\tPid");
+                cli_out ("Gluster process\t\t\t\t\t\tPort\tOnline\tPid");
                 cli_print_line (CLI_BRICK_STATUS_LINE_LEN);
         }
 
-        for (i = 0; i < count; i++) {
+        for (i = 0; i <= index_max; i++) {
 
 
                 memset (key, 0, sizeof (key));
                 snprintf (key, sizeof (key), "brick%d.hostname", i);
                 ret = dict_get_str (dict, key, &hostname);
                 if (ret)
-                        goto out;
+                        continue;
 
                 memset (key, 0, sizeof (key));
                 snprintf (key, sizeof (key), "brick%d.path", i);
                 ret = dict_get_str (dict, key, &path);
                 if (ret)
-                        goto out;
+                        continue;
 
+                /* Brick/not-brick is handled seperately here as all
+                 * types of nodes are contained in the default ouput
+                 */
                 memset (status.brick, 0, PATH_MAX + 255);
-                snprintf (status.brick, PATH_MAX + 255, "%s:%s",
-                          hostname, path);
+                if (!strcmp (hostname, "NFS Server") ||
+                    !strcmp (hostname, "Self-heal Daemon"))
+                        snprintf (status.brick, PATH_MAX + 255, "%s on %s",
+                                  hostname, path);
+                else
+                        snprintf (status.brick, PATH_MAX + 255, "Brick %s:%s",
+                                  hostname, path);
 
                 memset (key, 0, sizeof (key));
                 snprintf (key, sizeof (key), "brick%d.port", i);
                 ret = dict_get_int32 (dict, key, &(status.port));
                 if (ret)
-                        goto out;
+                        continue;
 
                 memset (key, 0, sizeof (key));
                 snprintf (key, sizeof (key), "brick%d.status", i);
                 ret = dict_get_int32 (dict, key, &(status.online));
                 if (ret)
-                        goto out;
+                        continue;
 
                 memset (key, 0, sizeof (key));
                 snprintf (key, sizeof (key), "brick%d.pid", i);
                 ret = dict_get_int32 (dict, key, &pid);
                 if (ret)
-                        goto out;
+                        continue;
                 if (pid == -1)
                         ret = gf_asprintf (&(status.pid_str), "%s", "N/A");
                 else
@@ -5426,6 +5545,8 @@ gf_cli_status_volume_all (call_frame_t *frame, xlator_t *this, void *data)
                 gf_log ("cli", GF_LOG_ERROR, "status all failed");
         if (ret && dict)
                 dict_unref (dict);
+        if (frame)
+                frame->local = NULL;
         return ret;
 }
 

@@ -277,7 +277,7 @@ out:
 
 void
 _crawl_post_sh_action (xlator_t *this, loc_t *parent, loc_t *child,
-                       int32_t op_ret, int32_t op_errno,
+                       int32_t op_ret, int32_t op_errno, dict_t *xattr_rsp,
                        afr_crawl_data_t *crawl_data)
 {
         int              ret = 0;
@@ -286,6 +286,8 @@ _crawl_post_sh_action (xlator_t *this, loc_t *parent, loc_t *child,
         eh_t             *eh = NULL;
         char             *path = NULL;
         shd_event_t      *event = NULL;
+        int32_t          sh_failed = 0;
+        gf_boolean_t     split_brain = 0;
 
         priv = this->private;
         shd  = &priv->shd;
@@ -307,9 +309,12 @@ _crawl_post_sh_action (xlator_t *this, loc_t *parent, loc_t *child,
                 }
         }
 
-        if (op_ret < 0 && op_errno == EIO)
+        if (xattr_rsp)
+                ret = dict_get_int32 (xattr_rsp, "sh-failed", &sh_failed);
+        split_brain = afr_is_split_brain (this, child->inode);
+        if ((op_ret < 0 && op_errno == EIO) || split_brain)
                 eh = shd->split_brain;
-        else if (op_ret < 0)
+        else if ((op_ret < 0) || sh_failed)
                 eh = shd->heal_failed;
         else
                 eh = shd->healed;
@@ -338,6 +343,7 @@ _self_heal_entry (xlator_t *this, afr_crawl_data_t *crawl_data, gf_dirent_t *ent
 {
         struct iatt      parentbuf = {0};
         int              ret = 0;
+        dict_t           *xattr_rsp = NULL;
 
         if (uuid_is_null (child->gfid))
                 gf_log (this->name, GF_LOG_DEBUG, "lookup %s", child->path);
@@ -346,8 +352,11 @@ _self_heal_entry (xlator_t *this, afr_crawl_data_t *crawl_data, gf_dirent_t *ent
                         uuid_utoa (child->gfid));
 
         ret = syncop_lookup (this, child, NULL,
-                             iattr, NULL, &parentbuf);
-        _crawl_post_sh_action (this, parent, child, ret, errno, crawl_data);
+                             iattr, &xattr_rsp, &parentbuf);
+        _crawl_post_sh_action (this, parent, child, ret, errno, xattr_rsp,
+                               crawl_data);
+        if (xattr_rsp)
+                dict_unref (xattr_rsp);
         return ret;
 }
 
@@ -536,7 +545,8 @@ afr_xl_op (xlator_t *this, dict_t *input, dict_t *output)
                 ret = _do_self_heal_on_local_subvols (this, FULL, output);
                 break;
         case GF_AFR_OP_INDEX_SUMMARY:
-                ret = _get_index_summary_on_local_subvols (this, output);
+                (void)_get_index_summary_on_local_subvols (this, output);
+                ret = 0;
                 break;
         case GF_AFR_OP_HEALED_FILES:
                 ret = _add_all_subvols_eh_to_dict (this, shd->healed, output);
@@ -641,63 +651,6 @@ afr_proactive_self_heal (void *data)
 out:
         return;
 }
-
-static int
-get_pathinfo_host (char *pathinfo, char *hostname, size_t size)
-{
-        char    *start = NULL;
-        char    *end = NULL;
-        int     ret  = -1;
-        int     i    = 0;
-
-        if (!pathinfo)
-                goto out;
-
-        start = strchr (pathinfo, ':');
-        if (!start)
-                goto out;
-        end = strrchr (pathinfo, ':');
-        if (start == end)
-                goto out;
-
-        memset (hostname, 0, size);
-        i = 0;
-        while (++start != end)
-                hostname[i++] = *start;
-        ret = 0;
-out:
-        return ret;
-}
-
-int
-afr_local_pathinfo (char *pathinfo, gf_boolean_t *local)
-{
-        int             ret   = 0;
-        char            pathinfohost[1024] = {0};
-        char            localhost[1024] = {0};
-        xlator_t        *this = THIS;
-
-        *local = _gf_false;
-        ret = get_pathinfo_host (pathinfo, pathinfohost, sizeof (pathinfohost));
-        if (ret) {
-                gf_log (this->name, GF_LOG_ERROR, "Invalid pathinfo: %s",
-                        pathinfo);
-                goto out;
-        }
-
-        ret = gethostname (localhost, sizeof (localhost));
-        if (ret) {
-                gf_log (this->name, GF_LOG_ERROR, "gethostname() failed, "
-                        "reason: %s", strerror (errno));
-                goto out;
-        }
-
-        if (!strcmp (localhost, pathinfohost))
-                *local = _gf_true;
-out:
-        return ret;
-}
-
 
 int
 afr_crawl_build_start_loc (xlator_t *this, afr_crawl_data_t *crawl_data,
@@ -961,35 +914,33 @@ int
 afr_find_child_position (xlator_t *this, int child, afr_child_pos_t *pos)
 {
         afr_private_t    *priv = NULL;
+        afr_self_heald_t *shd  = NULL;
         dict_t           *xattr_rsp = NULL;
         loc_t            loc = {0};
         int              ret = 0;
-        gf_boolean_t     local = _gf_false;
-        char             *pathinfo = NULL;
+        char             *node_uuid = NULL;
 
         priv = this->private;
+        shd  = &priv->shd;
 
         afr_build_root_loc (this, &loc);
 
         ret = syncop_getxattr (priv->children[child], &loc, &xattr_rsp,
-                               GF_XATTR_PATHINFO_KEY);
+                               GF_XATTR_NODE_UUID_KEY);
         if (ret) {
                 gf_log (this->name, GF_LOG_ERROR, "getxattr failed on %s",
                         priv->children[child]->name);
                 goto out;
         }
 
-        ret = dict_get_str (xattr_rsp, GF_XATTR_PATHINFO_KEY, &pathinfo);
+        ret = dict_get_str (xattr_rsp, GF_XATTR_NODE_UUID_KEY, &node_uuid);
         if (ret) {
-                gf_log (this->name, GF_LOG_ERROR, "Pathinfo key not found on "
+                gf_log (this->name, GF_LOG_ERROR, "node-uuid key not found on "
                         "child %d", child);
                 goto out;
         }
 
-        ret = afr_local_pathinfo (pathinfo, &local);
-        if (ret)
-                goto out;
-        if (local)
+        if (!strcmp (node_uuid, shd->node_uuid))
                 *pos = AFR_POS_LOCAL;
         else
                 *pos = AFR_POS_REMOTE;

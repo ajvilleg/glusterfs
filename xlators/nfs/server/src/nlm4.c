@@ -432,8 +432,6 @@ nlm4svc_submit_reply (rpcsvc_request_t *req, void *arg, nlm4_serializer sfunc)
 
         /* Then, submit the message for transmission. */
         ret = rpcsvc_submit_message (req, &outmsg, 1, NULL, 0, iobref);
-        iobuf_unref (iob);
-        iobref_unref (iobref);
         if (ret == -1) {
                 gf_log (GF_NLM, GF_LOG_ERROR, "Reply submission failed");
                 goto ret;
@@ -441,6 +439,11 @@ nlm4svc_submit_reply (rpcsvc_request_t *req, void *arg, nlm4_serializer sfunc)
 
         ret = 0;
 ret:
+        if (iob)
+                iobuf_unref (iob);
+        if (iobref)
+                iobref_unref (iobref);
+
         return ret;
 }
 
@@ -484,7 +487,8 @@ int nsm_monitor(char *host)
         clnt = clnt_create("localhost", SM_PROG, SM_VERS, "tcp");
         if(!clnt)
         {
-                gf_log (GF_NLM, GF_LOG_ERROR, "Clnt_create()");
+                gf_log (GF_NLM, GF_LOG_ERROR, "%s",
+                        clnt_spcreateerror ("Clnt_create()"));
                 goto out;
         }
 
@@ -507,7 +511,8 @@ int nsm_monitor(char *host)
 out:
         GF_FREE(nsm_mon.mon_id.mon_name);
         GF_FREE(nsm_mon.mon_id.my_id.my_name);
-        clnt_destroy(clnt);
+        if (clnt != NULL)
+                clnt_destroy(clnt);
         return retstat;
 }
 
@@ -1040,6 +1045,11 @@ nlm4svc_send_granted (nfs3_call_state_t *cs)
                 goto ret;
         }
 ret:
+        if (iobref)
+                iobref_unref (iobref);
+        if (iobuf)
+                iobuf_unref (iobuf);
+
         rpc_clnt_unref (rpc_clnt);
         nfs3_call_state_wipe (cs);
         return;
@@ -1699,23 +1709,35 @@ nlm4svc_sm_notify (struct nlm_sm_status *status)
 }
 
 rpcsvc_actor_t  nlm4svc_actors[NLM4_PROC_COUNT] = {
-        {"NULL", NLM4_NULL, nlm4svc_null, NULL, NULL},
-        {"TEST", NLM4_TEST, nlm4svc_test, NULL, NULL},
-        {"LOCK", NLM4_LOCK, nlm4svc_lock, NULL, NULL},
-        {"CANCEL", NLM4_CANCEL, nlm4svc_cancel, NULL, NULL},
-        {"UNLOCK", NLM4_UNLOCK, nlm4svc_unlock, NULL, NULL},
-        {"GRANTED", NLM4_GRANTED, NULL, NULL, NULL},
-        {"TEST", NLM4_TEST_MSG, NULL, NULL, NULL},
-        {"LOCK", NLM4_LOCK_MSG, NULL, NULL, NULL},
-        {"CANCEL", NLM4_CANCEL_MSG, NULL, NULL, NULL},
-        {"UNLOCK", NLM4_UNLOCK_MSG, NULL, NULL, NULL},
-        {"GRANTED", NLM4_GRANTED_MSG, NULL, NULL, NULL},
-        {"TEST", NLM4_TEST_RES, NULL, NULL, NULL},
-        {"LOCK", NLM4_LOCK_RES, NULL, NULL, NULL},
-        {"CANCEL", NLM4_CANCEL_RES, NULL, NULL, NULL},
-        {"UNLOCK", NLM4_UNLOCK_RES, NULL, NULL, NULL},
-        {"GRANTED", NLM4_GRANTED_RES, NULL, NULL, NULL},
-        {"SM_NOTIFY", NLM4_SM_NOTIFY, NULL, NULL, NULL},
+        /* 0 */
+        {"NULL",       NLM4_NULL,         nlm4svc_null,      NULL, NULL},
+        {"TEST",       NLM4_TEST,         nlm4svc_test,      NULL, NULL},
+        {"LOCK",       NLM4_LOCK,         nlm4svc_lock,      NULL, NULL},
+        {"CANCEL",     NLM4_CANCEL,       nlm4svc_cancel,    NULL, NULL},
+        {"UNLOCK",     NLM4_UNLOCK,       nlm4svc_unlock,    NULL, NULL},
+        /* 5 */
+        {"GRANTED",    NLM4_GRANTED,      NULL,              NULL, NULL},
+        {"TEST",       NLM4_TEST_MSG,     NULL,              NULL, NULL},
+        {"LOCK",       NLM4_LOCK_MSG,     NULL,              NULL, NULL},
+        {"CANCEL",     NLM4_CANCEL_MSG,   NULL,              NULL, NULL},
+        {"UNLOCK",     NLM4_UNLOCK_MSG,   NULL,              NULL, NULL},
+        /* 10 */
+        {"GRANTED",    NLM4_GRANTED_MSG,  NULL,              NULL, NULL},
+        {"TEST",       NLM4_TEST_RES,     NULL,              NULL, NULL},
+        {"LOCK",       NLM4_LOCK_RES,     NULL,              NULL, NULL},
+        {"CANCEL",     NLM4_CANCEL_RES,   NULL,              NULL, NULL},
+        {"UNLOCK",     NLM4_UNLOCK_RES,   NULL,              NULL, NULL},
+        /* 15 ; 17,18,19 are dummy actors */
+        {"GRANTED",    NLM4_GRANTED_RES,  NULL,              NULL, NULL},
+        {"SM_NOTIFY",  NLM4_SM_NOTIFY,    NULL,              NULL, NULL},
+        {"SEVENTEEN",  NLM4_SEVENTEEN,    NULL,              NULL, NULL},
+        {"EIGHTEEN",   NLM4_EIGHTEEN,     NULL,              NULL, NULL},
+        {"NINETEEN",   NLM4_NINETEEN,     NULL,              NULL, NULL},
+        /* 20 */
+        {"SHARE",      NLM4_SHARE,        NULL,              NULL, NULL},
+        {"UNSHARE",    NLM4_UNSHARE,      NULL,              NULL, NULL},
+        {"NM_LOCK",    NLM4_NM_LOCK,      NULL,              NULL, NULL},
+        {"FREE_ALL",   NLM4_FREE_ALL,     nlm4svc_null,      NULL, NULL},
 };
 
 rpcsvc_program_t        nlm4prog = {

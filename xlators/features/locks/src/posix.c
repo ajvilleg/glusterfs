@@ -219,6 +219,10 @@ unwind:
                 "error: %s", op_ret, strerror (op_errno));
         if (local->op == TRUNCATE)
                 loc_wipe (&local->loc);
+        if (local->xdata)
+                dict_unref (local->xdata);
+        if (local->fd)
+                fd_unref (local->fd);
 
         STACK_UNWIND_STRICT (truncate, frame, op_ret, op_errno, buf, NULL, xdata);
         return 0;
@@ -237,7 +241,8 @@ pl_truncate (call_frame_t *frame, xlator_t *this,
         local->op         = TRUNCATE;
         local->offset     = offset;
         loc_copy (&local->loc, loc);
-        local->xdata = dict_ref (xdata);
+        if (xdata)
+                local->xdata = dict_ref (xdata);
 
         frame->local = local;
 
@@ -267,7 +272,8 @@ pl_ftruncate (call_frame_t *frame, xlator_t *this,
         local->op         = FTRUNCATE;
         local->offset     = offset;
         local->fd         = fd_ref (fd);
-        local->xdata      = dict_ref (xdata);
+        if (xdata)
+                local->xdata = dict_ref (xdata);
 
         frame->local = local;
 

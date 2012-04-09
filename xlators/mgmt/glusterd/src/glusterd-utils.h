@@ -57,6 +57,9 @@ typedef struct glusterd_voldict_ctx_ {
         char    *val_name;
 } glusterd_voldict_ctx_t;
 
+int
+glusterd_compare_lines (const void *a, const void *b);
+
 typedef int (*glusterd_condition_func) (glusterd_volinfo_t *volinfo,
                                         glusterd_brickinfo_t *brickinfo,
                                         void *ctx);
@@ -312,7 +315,8 @@ glusterd_is_rb_ongoing (glusterd_volinfo_t *volinfo);
 
 int
 glusterd_rb_check_bricks (glusterd_volinfo_t *volinfo,
-                          glusterd_brickinfo_t *src_brick, glusterd_brickinfo_t *dst_brick);
+                          glusterd_brickinfo_t *src_brick,
+                          glusterd_brickinfo_t *dst_brick);
 
 int
 glusterd_brick_create_path (char *host, char *path, uuid_t uuid, mode_t mode,
@@ -412,10 +416,12 @@ int
 glusterd_restart_rebalance (glusterd_conf_t *conf);
 
 int32_t
-glusterd_add_bricks_hname_path_to_dict (dict_t *dict);
+glusterd_add_bricks_hname_path_to_dict (dict_t *dict,
+                                        glusterd_volinfo_t *volinfo);
 
 int
-glusterd_add_node_to_dict (char *server, dict_t *dict, int count);
+glusterd_add_node_to_dict (char *server, dict_t *dict, int count,
+                           dict_t *vol_opts);
 
 char *
 glusterd_uuid_to_hostname (uuid_t uuid);
