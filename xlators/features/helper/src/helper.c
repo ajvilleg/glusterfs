@@ -429,7 +429,7 @@ helper_fxattrop (call_frame_t *frame, xlator_t *this, fd_t *fd,
                                 return 0;
                         }
                 }
-                data = dict_get(dict,"trusted.afr.self-heal-erase");
+                data = dict_get(xdata,"trusted.afr.self-heal-erase");
                 if (data) {
                         gf_log (this->name, GF_LOG_DEBUG, "detected self-heal");
                         ++(ctx_ptr->sh_version);
