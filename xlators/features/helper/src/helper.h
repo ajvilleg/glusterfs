@@ -37,7 +37,8 @@ typedef struct {
 } helper_private_t;
 
 typedef struct {
-        uint32_t         version;
+        uint32_t         version;       /* From writes. */
+        uint32_t         sh_version;    /* From self-heals. */
         void            *trans;
         uint32_t         locks;
         /*
@@ -55,7 +56,8 @@ typedef struct {
 typedef struct {
         int32_t          real_op_ret;
         int32_t          real_op_errno;
-        uint32_t         version;
+        uint32_t         version;       /* From writes. */
+        uint32_t         sh_version;    /* From self-heals. */
         /* Following fields used by f/inodelk. */
         inode_t         *inode;
         short            l_type;

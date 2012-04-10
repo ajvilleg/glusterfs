@@ -66,10 +66,6 @@ get_pending_dict (xlator_t *this, uint32_t *incrs, gf_boolean_t *up,
 
         afr = this->children->xlator;
 	for (trav = afr->children; trav; trav = trav->next, ++i) {
-                if (!up[i]) {
-                        continue;
-                }
-
 		if (gf_asprintf(&key,"trusted.afr.%s",trav->xlator->name) < 0) {
 			gf_log (this->name, GF_LOG_WARNING,
 				"failed to allocate key");
@@ -127,6 +123,37 @@ hsrepl_decr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         return 0;
 }
 
+dict_t *
+hsrepl_add_version (dict_t *in_dict, uint32_t version, uint32_t sh_version)
+{
+        dict_t  *out_dict       = NULL;
+
+        if (in_dict) {
+                out_dict = in_dict;
+        }
+        else {
+                out_dict = dict_new();
+                if (!out_dict) {
+                        gf_log (THIS->name, GF_LOG_WARNING,
+                                "could not allocate out_dict");
+                        goto done;
+                }
+        }
+
+        if (dict_set_uint32(out_dict,"hsrepl.request-vers",version) != 0) {
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "could not set request-vers");
+        }
+
+        if (dict_set_uint32(out_dict,"hsrepl.heal-vers",sh_version) != 0) {
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "could not set heal-vers");
+        }
+
+done:
+        return out_dict;
+}
+
 int32_t
 hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                    int32_t op_ret, int32_t op_errno, struct iatt *prebuf,
@@ -141,11 +168,19 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         uint8_t                  i              = 0;
         hsrepl_ctx_t            *ctx            = local->ctx;
         gf_boolean_t             up_copy[2]     = { _gf_false, };
-        uint32_t                 version       = 0;
+        uint32_t                 version        = 0;
+        uint32_t                 sh_version     = 0;
+        uint64_t                 index          = CAST2INT(cookie);
+        dict_t                  *vdict          = NULL;
 
         if (dict_get_uint32(xdata,"hsrepl.reply-vers",&version) != 0) {
                 gf_log (this->name, GF_LOG_WARNING,
                         "could not get reply-vers");
+        }
+
+        if (dict_get_uint32(xdata,"hsrepl.heal-vers",&sh_version) != 0) {
+                gf_log (this->name, GF_LOG_WARNING,
+                        "could not get heal-vers");
         }
 
         LOCK(&frame->lock);
@@ -166,14 +201,26 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 if (postbuf) {
                         memcpy(&local->good_postbuf,postbuf,sizeof(*postbuf));
                 }
-                ++(local->incrs[CAST2INT(cookie)]);
+                ++(local->incrs[index]);
         }
         UNLOCK(&frame->lock);
 
         if (version) {
                 gf_log (this->name, GF_LOG_DEBUG,
-                        "got version %u from %lu", version, CAST2INT(cookie));
-                ctx->versions[CAST2INT(cookie)] = version;
+                        "got version %u from %lu", version, index);
+                ctx->versions[index] = version;
+        }
+
+        if (sh_version) {
+                gf_log (this->name, GF_LOG_DEBUG,
+                        "got sh_version %u from %lu",
+                        sh_version, index);
+                if (sh_version != ctx->sh_versions[index]) {
+                        gf_log (this->name, GF_LOG_DEBUG,
+                                "self-heal clobbered our increments");
+                        local->incrs[index] = 0;
+                }
+                ctx->sh_versions[index] = sh_version;
         }
 
         if (!done) {
@@ -238,11 +285,17 @@ hsrepl_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                                         "failed to allocate dict");
                                 continue;
                         }
+                        vdict = hsrepl_add_version (NULL,
+                                                    ctx->versions[i],
+                                                    ctx->sh_versions[i]);
                         STACK_WIND_COOKIE (newframe, hsrepl_decr_cbk, local->fd,
                                     trav->xlator, trav->xlator->fops->fxattrop,
                                     local->fd, GF_XATTROP_ADD_ARRAY, dict,
-                                    NULL);
+                                    vdict);
                         dict_unref(dict);
+                        if (vdict) {
+                                dict_unref(vdict);
+                        }
                         trav = trav->next;
                 }
         }
@@ -291,6 +344,7 @@ hsrepl_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                 }
                 for (i = 0; i < 2; ++i) {
                         ctx_ptr->versions[i] = 888;
+                        ctx_ptr->sh_versions[i] = 5150;
                 }
                 ctx_int = CAST2INT(ctx_ptr);
                 if (inode_ctx_set(fd->inode,this,&ctx_int) != 0) {
@@ -329,32 +383,6 @@ err:
         return 0;
 }
 
-dict_t *
-hsrepl_add_version (dict_t *in_dict, uint32_t version)
-{
-        dict_t  *out_dict       = NULL;
-
-        if (in_dict) {
-                out_dict = in_dict;
-        }
-        else {
-                out_dict = dict_new();
-                if (!out_dict) {
-                        gf_log (THIS->name, GF_LOG_WARNING,
-                                "could not allocate out_dict");
-                        goto done;
-                }
-        }
-
-        if (dict_set_uint32(out_dict,"hsrepl.request-vers",version) != 0) {
-                gf_log (THIS->name, GF_LOG_WARNING,
-                        "could not set request-vers");
-        }
-
-done:
-        return out_dict;
-}
-
 gf_boolean_t
 hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx)
 {
@@ -386,7 +414,8 @@ hsrepl_writev_continue (call_frame_t *frame, xlator_t *this, hsrepl_ctx_t *ctx)
                 gf_log (this->name, GF_LOG_DEBUG,
                         "sending version %u to %u", ctx->versions[i], i);
                 local->xdata[i] = hsrepl_add_version(local->xdata[i],
-                                                     ctx->versions[i]);
+                                                     ctx->versions[i],
+                                                     ctx->sh_versions[i]);
                 STACK_WIND_COOKIE(frame,hsrepl_writev_cbk, CAST2PTR(i),
                                   trav->xlator, trav->xlator->fops->writev,
                                   local->fd, local->vector, local->count,

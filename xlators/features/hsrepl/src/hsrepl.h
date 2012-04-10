@@ -45,6 +45,7 @@ typedef struct _hsrepl_private {
 
 typedef struct {
         uint32_t         versions[2];
+        uint32_t         sh_versions[2];
 } hsrepl_ctx_t;
 
 typedef struct _hsrepl_local {

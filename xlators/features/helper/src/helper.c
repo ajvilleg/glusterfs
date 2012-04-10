@@ -98,7 +98,7 @@ free_dict:
 }
 
 dict_t *
-helper_add_version (dict_t *in_dict, uint32_t version)
+helper_add_version (dict_t *in_dict, uint32_t version, uint32_t sh_version)
 {
         dict_t  *out_dict       = NULL;
 
@@ -117,6 +117,11 @@ helper_add_version (dict_t *in_dict, uint32_t version)
         if (dict_set_uint32(out_dict,"hsrepl.reply-vers",version) != 0) {
                 gf_log (THIS->name, GF_LOG_WARNING,
                         "could not set reply-vers");
+        }
+
+        if (dict_set_uint32(out_dict,"hsrepl.heal-vers",sh_version) != 0) {
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "could not set heal-vers");
         }
 
 done:
@@ -147,7 +152,7 @@ helper_clr_pending_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 {
         helper_local_t  *local = frame->local;
 
-        xdata = helper_add_version(xdata,local->version);
+        xdata = helper_add_version(xdata,local->version,local->sh_version);
         STACK_UNWIND_STRICT (writev, frame,
                              local->real_op_ret, local->real_op_errno,
                              NULL, NULL, xdata);
@@ -198,6 +203,7 @@ helper_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         local->real_op_ret = op_ret;
         local->real_op_errno = op_errno;
         local->version = version;
+        local->sh_version = ctx_ptr->sh_version;
         frame->local = local;
 
         STACK_WIND_COOKIE (frame, helper_clr_pending_cbk, cookie,
@@ -210,7 +216,7 @@ helper_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 free_local:
         GF_FREE(local);
 unwind:
-        xdata = helper_add_version(xdata,version);
+        xdata = helper_add_version(xdata,version,ctx_ptr->sh_version);
         STACK_UNWIND_STRICT (writev, frame, op_ret, op_errno,
                              prebuf, postbuf, xdata);
         dict_unref(xdata);
@@ -242,6 +248,7 @@ helper_create_ctx (xlator_t *this, inode_t *inode)
                 return NULL;
         }
         ctx_ptr->version = 888;
+        ctx_ptr->sh_version = 5150;
         ctx_ptr->trans = NULL;
 
         ctx_int = CAST2INT(ctx_ptr);
@@ -266,8 +273,14 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
         helper_ctx_t     *ctx_ptr = NULL;
         helper_private_t *priv = this->private;
         uint32_t          version = 0;
+        uint32_t          sh_version = 0;
 
         if (dict_get_uint32(xdata,"hsrepl.request-vers",&version) != 0) {
+                return default_writev (frame, this, fd, vector, count, off,
+                                       flags, iobref, xdata);
+        }
+
+        if (dict_get_uint32(xdata,"hsrepl.heal-vers",&sh_version) != 0) {
                 return default_writev (frame, this, fd, vector, count, off,
                                        flags, iobref, xdata);
         }
@@ -282,13 +295,26 @@ helper_writev (call_frame_t *frame, xlator_t *this, fd_t *fd,
                 if (!ctx_ptr) {
                         goto err;
                 }
-                if ((version != ctx_ptr->version) || ctx_ptr->locks) {
+                op_errno = EKEYEXPIRED;
+                if (ctx_ptr->locks) {
                         gf_log (this->name, GF_LOG_DEBUG,
-                                "received %u != stored %u",
+                                "data version: received %u != stored %u",
                                 version, ctx_ptr->version);
-                        op_errno = EKEYEXPIRED;
+                        goto err;
+                 }
+                if (version != ctx_ptr->version) {
+                        gf_log (this->name, GF_LOG_DEBUG,
+                                "data version: received %u != stored %u",
+                                version, ctx_ptr->version);
                         goto err;
                 }
+                if (sh_version != ctx_ptr->sh_version) {
+                        gf_log (this->name, GF_LOG_DEBUG,
+                                "heal version: received %u != stored %u",
+                                sh_version, ctx_ptr->sh_version);
+                        goto err;
+                }
+                op_errno = ENOMEM;
         }
         else {
                 ctx_ptr = helper_create_ctx(this,fd->inode);
@@ -331,7 +357,8 @@ free_stub:
         call_stub_destroy(stub);
 err:
         if (ctx_ptr) {
-                xdata = helper_add_version(xdata,ctx_ptr->version);
+                xdata = helper_add_version(xdata,ctx_ptr->version,
+                                           ctx_ptr->sh_version);
                 STACK_UNWIND_STRICT (writev, frame, -1, op_errno,
                                      NULL, NULL, xdata);
                 dict_unref(xdata);
@@ -386,11 +413,27 @@ int32_t
 helper_fxattrop (call_frame_t *frame, xlator_t *this, fd_t *fd,
                  gf_xattrop_flags_t flags, dict_t *dict, dict_t *xdata)
 {
-        data_t  *data = NULL;
+        uint64_t         ctx_int = 0;
+        helper_ctx_t    *ctx_ptr = NULL;
+        uint32_t         sh_version = 0;
+        data_t          *data = NULL;
 
-        data = dict_get(dict,"trusted.afr.self-heal-erase");
-        if (data) {
-                gf_log (this->name, GF_LOG_DEBUG, "detected self-heal");
+        if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
+                ctx_ptr = CAST2PTR(ctx_int);
+                if (!dict_get_uint32(xdata,"hsrepl.heal-vers",&sh_version)) {
+                        if (sh_version != ctx_ptr->sh_version) {
+                                gf_log (this->name, GF_LOG_DEBUG,
+                                        "dropping self-heal-interrupted op");
+                                STACK_UNWIND_STRICT (fxattrop, frame,
+                                                     0, 0, dict, xdata);
+                                return 0;
+                        }
+                }
+                data = dict_get(dict,"trusted.afr.self-heal-erase");
+                if (data) {
+                        gf_log (this->name, GF_LOG_DEBUG, "detected self-heal");
+                        ++(ctx_ptr->sh_version);
+                }
         }
 
         STACK_WIND (frame, default_fxattrop_cbk, FIRST_CHILD(this),
