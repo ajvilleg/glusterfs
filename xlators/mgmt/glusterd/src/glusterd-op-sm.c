@@ -504,6 +504,7 @@ glusterd_op_stage_reset_volume (dict_t *dict, char **op_errstr)
         char                                    msg[2048]      = {0};
         char                                    *key = NULL;
         char                                    *key_fixed = NULL;
+        glusterd_volinfo_t                      *volinfo       = NULL;
 
         ret = dict_get_str (dict, "volname", &volname);
 
@@ -522,6 +523,13 @@ glusterd_op_stage_reset_volume (dict_t *dict, char **op_errstr)
                 ret = -1;
                 goto out;
         }
+        ret = glusterd_volinfo_find (volname, &volinfo);
+        if (ret)
+                goto out;
+
+        ret = glusterd_validate_volume_id (dict, volinfo);
+        if (ret)
+                goto out;
 
         ret = dict_get_str (dict, "key", &key);
         if (ret) {
@@ -568,6 +576,7 @@ glusterd_op_stage_sync_volume (dict_t *dict, char **op_errstr)
         gf_boolean_t                            exists = _gf_false;
         glusterd_peerinfo_t                     *peerinfo = NULL;
         char                                    msg[2048] = {0,};
+        glusterd_volinfo_t                      *volinfo  = NULL;
 
         ret = dict_get_str (dict, "hostname", &hostname);
         if (ret) {
@@ -607,6 +616,13 @@ glusterd_op_stage_sync_volume (dict_t *dict, char **op_errstr)
                                 ret = -1;
                                 goto out;
                         }
+                        ret = glusterd_volinfo_find (volname, &volinfo);
+                        if (ret)
+                                goto out;
+
+                        ret = glusterd_validate_volume_id (dict, volinfo);
+                        if (ret)
+                                goto out;
                 } else {
                         ret = 0;
                 }
@@ -663,6 +679,10 @@ glusterd_op_stage_status_volume (dict_t *dict, char **op_errstr)
                 ret = -1;
                 goto out;
         }
+
+        ret = glusterd_validate_volume_id (dict, volinfo);
+        if (ret)
+                goto out;
 
         ret = glusterd_is_volume_started (volinfo);
         if (!ret) {
@@ -798,6 +818,10 @@ glusterd_op_stage_stats_volume (dict_t *dict, char **op_errstr)
                 ret = -1;
                 goto out;
         }
+
+        ret = glusterd_validate_volume_id (dict, volinfo);
+        if (ret)
+                goto out;
 
         ret = dict_get_int32 (dict, "op", &stats_op);
         if (ret) {
@@ -1771,6 +1795,9 @@ glusterd_op_build_payload (dict_t **req)
         void                    *ctx = NULL;
         dict_t                  *req_dict = NULL;
         glusterd_op_t           op = GD_OP_NONE;
+        char                    *volname = NULL;
+        char                    *volid = NULL;
+        glusterd_volinfo_t      *volinfo = NULL;
 
         GF_ASSERT (req);
 
@@ -1820,6 +1847,32 @@ glusterd_op_build_payload (dict_t **req)
                 case GD_OP_DEFRAG_BRICK_VOLUME:
                         {
                                 dict_t  *dict = ctx;
+                                ret = dict_get_str (dict, "volname", &volname);
+                                if (ret) {
+                                        gf_log (THIS->name, GF_LOG_CRITICAL,
+                                                "volname is not present in "
+                                                "operation ctx");
+                                        goto out;
+                                }
+                                ret = glusterd_volinfo_find (volname, &volinfo);
+                                if (ret) {
+                                        gf_log (THIS->name, GF_LOG_ERROR,
+                                                "volume %s not present in "
+                                                "the cluster", volname);
+                                        goto out;
+                                }
+                                volid = gf_strdup (uuid_utoa (volinfo->volume_id));
+                                if (!volid) {
+                                        ret = -1;
+                                        goto out;
+                                }
+                                ret = dict_set_dynstr (dict, "vol-id", volid);
+                                if (ret) {
+                                        gf_log (THIS->name, GF_LOG_ERROR,
+                                                "Failed to set volume id in "
+                                                "dictionary");
+                                        goto out;
+                                }
                                 dict_copy (dict, req_dict);
                         }
                         break;
@@ -3134,6 +3187,7 @@ glusterd_defrag_volume_node_rsp (dict_t *req_dict, dict_t *rsp_dict,
         char                            buf[1024] = {0,};
         char                            *node_str = NULL;
         glusterd_conf_t                 *priv = NULL;
+        uint64_t                        failures = 0;
 
         priv = THIS->private;
         GF_ASSERT (req_dict);
@@ -3171,12 +3225,19 @@ glusterd_defrag_volume_node_rsp (dict_t *req_dict, dict_t *rsp_dict,
                 gf_log (THIS->name, GF_LOG_TRACE,
                         "failed to get status");
 
+        ret = dict_get_uint64 (rsp_dict, "failures", &failures);
+        if (ret)
+                gf_log (THIS->name, GF_LOG_TRACE,
+                        "failed to get failure count");
+
         if (files)
                 volinfo->rebalance_files = files;
         if (size)
                 volinfo->rebalance_data = size;
         if (lookup)
                 volinfo->lookedup_files = lookup;
+        if (failures)
+                volinfo->rebalance_failures = failures;
 
         if (!op_ctx) {
                 dict_copy (rsp_dict, op_ctx);
@@ -3229,6 +3290,13 @@ populate:
         if (ret)
                 gf_log (THIS->name, GF_LOG_ERROR,
                         "failed to set status");
+
+        memset (key, 0 , 256);
+        snprintf (key, 256, "failures-%d", i);
+        ret = dict_set_uint64 (op_ctx, key, volinfo->rebalance_failures);
+        if (ret)
+                gf_log (THIS->name, GF_LOG_ERROR,
+                        "failed to set failure count");
 
 out:
         return ret;

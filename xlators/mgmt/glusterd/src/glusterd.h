@@ -166,6 +166,7 @@ struct glusterd_defrag_info_ {
         uint64_t                     total_files;
         uint64_t                     total_data;
         uint64_t                     num_files_lookedup;
+        uint64_t                     total_failures;
         gf_lock_t                    lock;
         int                          cmd;
         pthread_t                    th;
@@ -226,6 +227,7 @@ struct glusterd_volinfo_ {
         uint64_t                lookedup_files;
         glusterd_defrag_info_t  *defrag;
         gf_cli_defrag_type      defrag_cmd;
+        uint64_t                rebalance_failures;
 
         /* Replace brick status */
         gf_rb_status_t          rb_status;
@@ -584,6 +586,10 @@ int glusterd_handle_cli_clearlocks_volume (rpcsvc_request_t *req);
 
 int glusterd_handle_defrag_start (glusterd_volinfo_t *volinfo, char *op_errstr,
                                   size_t len, int cmd, defrag_cbk_fn_t cbk);
+int
+glusterd_rebalance_rpc_create (glusterd_volinfo_t *volinfo,
+                               glusterd_conf_t *priv, int cmd);
+
 int glusterd_handle_cli_heal_volume (rpcsvc_request_t *req);
 
 int glusterd_handle_cli_list_volume (rpcsvc_request_t *req);

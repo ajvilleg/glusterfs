@@ -41,6 +41,7 @@
 #include "glusterd-utils.h"
 #include "glusterd-store.h"
 #include "run.h"
+#include "glusterd-volgen.h"
 
 #include "syscall.h"
 #include "cli1-xdr.h"
@@ -261,7 +262,9 @@ glusterd_handle_defrag_start (glusterd_volinfo_t *volinfo, char *op_errstr,
         char                   pidfile[PATH_MAX] = {0,};
         char                   logfile[PATH_MAX] = {0,};
         dict_t                 *options = NULL;
-
+#ifdef DEBUG
+        char                   valgrind_logfile[PATH_MAX] = {0,};
+#endif
         priv    = THIS->private;
 
         GF_ASSERT (volinfo);
@@ -287,6 +290,7 @@ glusterd_handle_defrag_start (glusterd_volinfo_t *volinfo, char *op_errstr,
         volinfo->rebalance_files = 0;
         volinfo->rebalance_data = 0;
         volinfo->lookedup_files = 0;
+        volinfo->rebalance_failures = 0;
 
         volinfo->defrag_cmd = cmd;
         glusterd_store_volinfo (volinfo, GLUSTERD_VOLINFO_VER_AC_INCREMENT);
@@ -311,6 +315,19 @@ glusterd_handle_defrag_start (glusterd_volinfo_t *volinfo, char *op_errstr,
         snprintf (logfile, PATH_MAX, "%s/%s-rebalance.log",
                     DEFAULT_LOG_FILE_DIRECTORY, volinfo->volname);
         runinit (&runner);
+#ifdef DEBUG
+        if (priv->valgrind) {
+                snprintf (valgrind_logfile, PATH_MAX,
+                          "%s/valgrind-%s-rebalance.log",
+                          DEFAULT_LOG_FILE_DIRECTORY,
+                          volinfo->volname);
+
+                runner_add_args (&runner, "valgrind", "--leak-check=full",
+                                 "--trace-children=yes", NULL);
+                runner_argprintf (&runner, "--log-file=%s", valgrind_logfile);
+        }
+#endif
+
         runner_add_args (&runner, SBIN_DIR"/glusterfs",
                          "-s", "localhost", "--volfile-id", volinfo->volname,
                          "--xlator-option", "*dht.use-readdirp=yes",
@@ -356,6 +373,46 @@ glusterd_handle_defrag_start (glusterd_volinfo_t *volinfo, char *op_errstr,
 
 out:
         gf_log ("", GF_LOG_DEBUG, "Returning %d", ret);
+        return ret;
+}
+
+
+int
+glusterd_rebalance_rpc_create (glusterd_volinfo_t *volinfo,
+                               glusterd_conf_t *priv, int cmd)
+{
+        dict_t                  *options = NULL;
+        char                     sockfile[PATH_MAX] = {0,};
+        int                      ret = -1;
+        glusterd_defrag_info_t  *defrag =  NULL;
+
+        if (!volinfo->defrag)
+                volinfo->defrag = GF_CALLOC (1, sizeof (glusterd_defrag_info_t),
+                                             gf_gld_mt_defrag_info);
+        if (!volinfo->defrag)
+                goto out;
+
+        defrag = volinfo->defrag;
+
+        defrag->cmd = cmd;
+
+        LOCK_INIT (&defrag->lock);
+
+        GLUSTERD_GET_DEFRAG_SOCK_FILE (sockfile, volinfo, priv);
+        ret = rpc_clnt_transport_unix_options_build (&options, sockfile);
+        if (ret) {
+                gf_log (THIS->name, GF_LOG_ERROR, "Unix options build failed");
+                goto out;
+        }
+
+        ret = glusterd_rpc_create (&defrag->rpc, options,
+                                   glusterd_defrag_notify, volinfo);
+        if (ret) {
+                gf_log (THIS->name, GF_LOG_ERROR, "RPC create failed");
+                goto out;
+        }
+        ret = 0;
+out:
         return ret;
 }
 
@@ -541,6 +598,9 @@ glusterd_op_rebalance (dict_t *dict, char **op_errstr, dict_t *rsp_dict)
         char                msg[2048] = {0};
         glusterd_volinfo_t *volinfo   = NULL;
         glusterd_conf_t    *priv      = NULL;
+        glusterd_brickinfo_t *brickinfo = NULL;
+        glusterd_brickinfo_t *tmp      = NULL;
+        gf_boolean_t        volfile_update = _gf_false;
 
         priv = THIS->private;
 
@@ -571,6 +631,38 @@ glusterd_op_rebalance (dict_t *dict, char **op_errstr, dict_t *rsp_dict)
                                                     cmd, NULL);
                  break;
         case GF_DEFRAG_CMD_STOP:
+                /* Fall back to the old volume file in case of decommission*/
+                list_for_each_entry_safe (brickinfo, tmp, &volinfo->bricks,
+                                          brick_list) {
+                        if (!brickinfo->decommissioned)
+                                continue;
+                        brickinfo->decommissioned = 0;
+                        volfile_update = _gf_true;
+                }
+
+                if (volfile_update == _gf_false) {
+                        ret = 0;
+                        break;
+                }
+
+                ret = glusterd_create_volfiles_and_notify_services (volinfo);
+                if (ret) {
+                        gf_log (THIS->name, GF_LOG_WARNING,
+                                "failed to create volfiles");
+                        goto out;
+                }
+
+                ret = glusterd_store_volinfo (volinfo,
+                                             GLUSTERD_VOLINFO_VER_AC_INCREMENT);
+                if (ret) {
+                        gf_log (THIS->name, GF_LOG_WARNING,
+                                "failed to store volinfo");
+                        goto out;
+                }
+
+                ret = 0;
+                break;
+
         case GF_DEFRAG_CMD_STATUS:
                 break;
         default:

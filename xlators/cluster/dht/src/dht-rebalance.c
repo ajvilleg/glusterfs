@@ -784,6 +784,7 @@ dht_migrate_file (xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
                 gf_log (this->name, GF_LOG_WARNING,
                         "%s: failed to perform setattr on %s (%s)",
                         loc->path, to->name, strerror (errno));
+                goto out;
         }
 
         /* Because 'futimes' is not portable */
@@ -804,6 +805,7 @@ dht_migrate_file (xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
                 gf_log (this->name, GF_LOG_WARNING,             \
                         "%s: failed to perform setattr on %s (%s)",
                         loc->path, from->name, strerror (errno));
+                goto out;
         }
 
         /* Do a stat and check the gfid before unlink */
@@ -812,6 +814,7 @@ dht_migrate_file (xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
                 gf_log (this->name, GF_LOG_WARNING,
                         "%s: failed to do a stat on %s (%s)",
                         loc->path, from->name, strerror (errno));
+                goto out;
         }
 
         if (uuid_compare (empty_iatt.ia_gfid, loc->gfid) == 0) {
@@ -821,6 +824,7 @@ dht_migrate_file (xlator_t *this, loc_t *loc, xlator_t *from, xlator_t *to,
                         gf_log (this->name, GF_LOG_WARNING,
                                 "%s: failed to perform unlink on %s (%s)",
                                 loc->path, from->name, strerror (errno));
+                        goto out;
                 }
         }
 
@@ -1190,16 +1194,19 @@ gf_defrag_migrate_data (xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
                         ret = syncop_getxattr (this, &entry_loc, &dict,
                                                GF_XATTR_LINKINFO_KEY);
                         if (ret < 0) {
-                                gf_log (this->name, GF_LOG_TRACE, "getxattr "
-                                        "failed for %s", entry_loc.path);
+                                gf_log (this->name, GF_LOG_TRACE, "failed to "
+                                        "get link-to key for %s",
+                                        entry_loc.path);
                                 continue;
                         }
 
                         ret = syncop_setxattr (this, &entry_loc, migrate_data,
                                                0);
-                        if (ret)
-                                gf_log (this->name, GF_LOG_ERROR, "setxattr "
-                                        "failed for %s", entry_loc.path);
+                        if (ret) {
+                                gf_log (this->name, GF_LOG_ERROR, "migrate-data"
+                                        " failed for %s", entry_loc.path);
+                                defrag->total_failures +=1;
+                        }
 
                         if (ret == -1) {
                                 op_errno = errno;
@@ -1208,7 +1215,7 @@ gf_defrag_migrate_data (xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
 
                                 if (!ret)
                                         gf_log (this->name, GF_LOG_DEBUG,
-                                                "setxattr on %s failed: %s",
+                                                "migrate-data on %s failed: %s",
                                                 entry_loc.path,
                                                 strerror (op_errno));
                                 else if (ret == 1)
@@ -1271,8 +1278,11 @@ gf_defrag_fix_layout (xlator_t *this, gf_defrag_info_t *defrag, loc_t *loc,
                 goto out;
         }
 
-        if (defrag->cmd != GF_DEFRAG_CMD_START_LAYOUT_FIX)
-                gf_defrag_migrate_data (this, defrag, loc, migrate_data);
+        if (defrag->cmd != GF_DEFRAG_CMD_START_LAYOUT_FIX) {
+                ret = gf_defrag_migrate_data (this, defrag, loc, migrate_data);
+                if (ret)
+                        goto out;
+        }
 
         gf_log (this->name, GF_LOG_TRACE, "fix layout called on %s", loc->path);
 
@@ -1540,6 +1550,7 @@ gf_defrag_status_get (gf_defrag_info_t *defrag, dict_t *dict)
         uint64_t files  = 0;
         uint64_t size   = 0;
         uint64_t lookup = 0;
+        uint64_t failures = 0;
 
         if (!defrag)
                 goto out;
@@ -1551,6 +1562,7 @@ gf_defrag_status_get (gf_defrag_info_t *defrag, dict_t *dict)
         files  = defrag->total_files;
         size   = defrag->total_data;
         lookup = defrag->num_files_lookedup;
+        failures = defrag->total_failures;
 
         if (!dict)
                 goto log;
@@ -1574,9 +1586,12 @@ gf_defrag_status_get (gf_defrag_info_t *defrag, dict_t *dict)
         if (ret)
                 gf_log (THIS->name, GF_LOG_WARNING,
                         "failed to set status");
+
+        ret = dict_set_uint64 (dict, "failures", failures);
 log:
         gf_log (THIS->name, GF_LOG_INFO, "Files migrated: %"PRIu64", size: %"
-                PRIu64", lookups: %"PRIu64, files, size, lookup);
+                PRIu64", lookups: %"PRIu64", failures: %"PRIu64, files, size,
+                lookup, failures);
 
 
 out:
@@ -1597,7 +1612,8 @@ gf_defrag_stop (gf_defrag_info_t *defrag, dict_t *output)
 
         defrag->defrag_status = GF_DEFRAG_STATUS_STOPPED;
 
-        gf_defrag_status_get (defrag, output);
+        if (output)
+                gf_defrag_status_get (defrag, output);
         ret = 0;
 out:
         gf_log ("glusterd", GF_LOG_DEBUG, "Returning %d", ret);

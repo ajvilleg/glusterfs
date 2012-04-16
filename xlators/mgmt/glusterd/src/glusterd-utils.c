@@ -3341,20 +3341,13 @@ out:
         return ret;
 }
 
-void *
-glusterd_brick_restart_proc (void *data)
+int
+glusterd_restart_bricks (glusterd_conf_t *conf)
 {
-        glusterd_conf_t      *conf           = NULL;
         glusterd_volinfo_t   *volinfo        = NULL;
         glusterd_brickinfo_t *brickinfo      = NULL;
         gf_boolean_t          start_nodesvcs = _gf_false;
-
-        conf = data;
-
-        GF_ASSERT (conf);
-
-        /* set the proper 'THIS' value as it is new thread */
-        THIS = conf->xl;
+        int                   ret            = 0;
 
         list_for_each_entry (volinfo, &conf->volumes, vol_list) {
                 /* If volume status is not started, do not proceed */
@@ -3369,24 +3362,6 @@ glusterd_brick_restart_proc (void *data)
 
         if (start_nodesvcs)
                 glusterd_nodesvcs_handle_graph_change (NULL);
-
-        return NULL;
-}
-
-int
-glusterd_restart_bricks (glusterd_conf_t *conf)
-{
-        int ret = 0;
-
-        conf->xl = THIS;
-        ret = pthread_create (&conf->brick_thread, NULL,
-                              glusterd_brick_restart_proc,
-                              conf);
-        if (ret != 0) {
-                gf_log (THIS->name, GF_LOG_DEBUG,
-                        "pthread_create() failed (%s)",
-                        strerror (errno));
-        }
 
         return ret;
 }
@@ -4398,7 +4373,7 @@ check_xattr:
                 if (uuid_compare (old_uuid, uuid)) {
                         uuid_utoa_r (old_uuid, old_uuid_buf);
                         gf_log (THIS->name, GF_LOG_WARNING,
-                                "%s: mismatching volume-id (%s) recieved. "
+                                "%s: mismatching volume-id (%s) received. "
                                 "already is a part of volume %s ",
                                 path, uuid_utoa (uuid), old_uuid_buf);
                         snprintf (msg, sizeof (msg), "'%s:%s' has been part of "
@@ -4962,7 +4937,7 @@ glusterd_set_dump_options (char *dumpoptions_path, char *options,
                 goto out;
         }
         dup_options = gf_strdup (options);
-        gf_log ("", GF_LOG_INFO, "Recieved following statedump options: %s",
+        gf_log ("", GF_LOG_INFO, "Received following statedump options: %s",
                 dup_options);
         option = strtok_r (dup_options, " ", &tmpptr);
         while (option) {
@@ -5286,6 +5261,8 @@ glusterd_volume_defrag_restart (glusterd_volinfo_t *volinfo, char *op_errstr,
         if (!glusterd_is_service_running (pidfile, &pid)) {
                 glusterd_handle_defrag_start (volinfo, op_errstr, len, cmd,
                                               cbk);
+        } else {
+                glusterd_rebalance_rpc_create (volinfo, priv, cmd);
         }
 
         return ret;
@@ -5352,4 +5329,32 @@ glusterd_is_local_brick (xlator_t *this, glusterd_volinfo_t *volinfo,
         local = !uuid_compare (brickinfo->uuid, conf->uuid);
 out:
         return local;
+}
+int
+glusterd_validate_volume_id (dict_t *op_dict, glusterd_volinfo_t *volinfo)
+{
+        int     ret             = -1;
+        char    *volid_str      = NULL;
+        uuid_t  vol_uid         = {0, };
+
+        ret = dict_get_str (op_dict, "vol-id", &volid_str);
+        if (ret) {
+                gf_log (THIS->name, GF_LOG_ERROR, "Failed to get volume id");
+                goto out;
+        }
+        ret = uuid_parse (volid_str, vol_uid);
+        if (ret) {
+                gf_log (THIS->name, GF_LOG_ERROR, "Failed to parse uuid");
+                goto out;
+        }
+
+        if (uuid_compare (vol_uid, volinfo->volume_id)) {
+                gf_log (THIS->name, GF_LOG_ERROR, "Volume ids are different. "
+                        "Possibly a split brain among peers.");
+                ret = -1;
+                goto out;
+        }
+
+out:
+        return ret;
 }

@@ -329,7 +329,7 @@ gf_cli3_1_list_friends_cbk (struct rpc_req *req, struct iovec *iov,
                                                    NULL);
                         if (ret)
                                 gf_log ("cli", GF_LOG_ERROR,
-                                        "Error ouputting to xml");
+                                        "Error outputting to xml");
                         goto out;
                 }
 #endif
@@ -1016,6 +1016,7 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
         char                    *node_uuid = NULL;
         char                     key[256] = {0,};
         int32_t                  i = 1;
+        uint64_t                 failures = 0;
 
         if (-1 == req->rpc_status) {
                 goto out;
@@ -1114,10 +1115,10 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
                         goto done;
                 }
         }
-        cli_out ("%40s %16s %13s %13s %14s", "Node", "Rebalanced-files",
-                 "size", "scanned", "status");
-        cli_out ("%40s %16s %13s %13s %14s", "---------", "-----------",
-                 "-----------", "-----------", "------------");
+        cli_out ("%40s %16s %13s %13s %13s %14s", "Node", "Rebalanced-files",
+                 "size", "scanned", "failures","status");
+        cli_out ("%40s %16s %13s %13s %13s %14s", "---------", "-----------",
+                 "-----------", "-----------", "-----------", "------------");
 
         do {
                 snprintf (key, 256, "node-uuid-%d", i);
@@ -1154,6 +1155,13 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
                         gf_log (THIS->name, GF_LOG_TRACE,
                                 "failed to get status");
 
+                memset (key, 0, 256);
+                snprintf (key, 256, "failures-%d", i);
+                ret = dict_get_uint64 (dict, key, &failures);
+                if (ret)
+                        gf_log (THIS->name, GF_LOG_TRACE,
+                                "failed to get failures count");
+
                 switch (status_rcd) {
                 case GF_DEFRAG_STATUS_NOT_STARTED:
                         status = "not started";
@@ -1171,8 +1179,9 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
                         status = "failed";
                         break;
                 }
-                cli_out ("%40s %16"PRId64 "%13"PRId64 "%13"PRId64 "%14s", node_uuid, files,
-                        size, lookup, status);
+                cli_out ("%40s %16"PRId64 "%13"PRId64 "%13"PRId64 "%13"PRId64
+                         " %14s", node_uuid, files, size, lookup, failures,
+                         status);
                 i++;
         } while (i <= counter);
 
@@ -1421,6 +1430,7 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
         int32_t                  counter = 0;
         char                    *node_uuid = 0;
         gf_defrag_status_t       status_rcd = GF_DEFRAG_STATUS_NOT_STARTED;
+        uint64_t                 failures = 0;
 
 
         if (-1 == req->rpc_status) {
@@ -1466,10 +1476,10 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
         }
 
 
-        cli_out ("%40s %16s %13s %13s %14s", "Node", "Rebalanced-files",
-                 "size", "scanned", "status");
-        cli_out ("%40s %16s %13s %13s %14s", "---------", "-----------",
-                 "-----------", "-----------", "------------");
+        cli_out ("%40s %16s %13s %13s %13s %14s", "Node", "Rebalanced-files",
+                 "size", "scanned", "failures", "status");
+        cli_out ("%40s %16s %13s %13s %13s %14s", "---------", "-----------",
+                 "-----------", "-----------", "-----------", "------------");
 
         do {
                 snprintf (key, 256, "node-uuid-%d", i);
@@ -1506,6 +1516,12 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
                         gf_log (THIS->name, GF_LOG_TRACE,
                                 "failed to get status");
 
+                snprintf (key, 256, "failures-%d", i);
+                ret = dict_get_uint64 (dict, key, &failures);
+                if (ret)
+                        gf_log (THIS->name, GF_LOG_TRACE,
+                                "Failed to get failure on files");
+
                 switch (status_rcd) {
                 case GF_DEFRAG_STATUS_NOT_STARTED:
                         status = "not started";
@@ -1523,8 +1539,9 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
                         status = "failed";
                         break;
                 }
-                cli_out ("%40s %16"PRId64 "%13"PRId64 "%13"PRId64 "%14s", node_uuid, files,
-                        size, lookup, status);
+                cli_out ("%40s %16"PRId64 "%13"PRId64 "%13"PRId64 "%13"PRId64
+                        " %14s", node_uuid, files, size, lookup, failures,
+                        status);
                 i++;
         } while (i <= counter);
 
@@ -1591,12 +1608,6 @@ gf_cli3_1_remove_brick_cbk (struct rpc_req *req, struct iovec *iov,
                 break;
         case GF_OP_CMD_COMMIT:
                 cmd_str = "commit";
-                break;
-        case GF_OP_CMD_ABORT:
-                cmd_str = "abort";
-                break;
-        case GF_OP_CMD_PAUSE:
-                cmd_str = "pause";
                 break;
         case GF_OP_CMD_COMMIT_FORCE:
                 cmd_str = "commit force";
@@ -2900,7 +2911,8 @@ gf_cli3_1_remove_brick (call_frame_t *frame, xlator_t *this,
         if (ret)
                 goto out;
 
-        if (command != GF_OP_CMD_STATUS) {
+        if ((command != GF_OP_CMD_STATUS) &&
+            (command != GF_OP_CMD_STOP)) {
 
                 ret = dict_allocate_and_serialize (dict,
                                                    &req.dict.dict_val,
@@ -2930,7 +2942,10 @@ gf_cli3_1_remove_brick (call_frame_t *frame, xlator_t *this,
                         goto out;
                 }
 
-                cmd |= GF_DEFRAG_CMD_STATUS;
+                if (command == GF_OP_CMD_STATUS)
+                        cmd |= GF_DEFRAG_CMD_STATUS;
+                else
+                        cmd |= GF_DEFRAG_CMD_STOP;
 
                 ret = dict_set_int32 (req_dict, "rebalance-command", (int32_t) cmd);
                 if (ret) {
@@ -5383,7 +5398,7 @@ gf_cli3_1_status_cbk (struct rpc_req *req, struct iovec *iov,
                         continue;
 
                 /* Brick/not-brick is handled seperately here as all
-                 * types of nodes are contained in the default ouput
+                 * types of nodes are contained in the default output
                  */
                 memset (status.brick, 0, PATH_MAX + 255);
                 if (!strcmp (hostname, "NFS Server") ||
@@ -5888,7 +5903,7 @@ gf_cli3_1_statedump_volume_cbk (struct rpc_req *req, struct iovec *iov,
                 gf_log (THIS->name, GF_LOG_ERROR, "XDR decoding failed");
                 goto out;
         }
-        gf_log ("cli", GF_LOG_DEBUG, "Recieved response to statedump");
+        gf_log ("cli", GF_LOG_DEBUG, "Received response to statedump");
         if (rsp.op_ret)
                 snprintf (msg, sizeof(msg), "%s", rsp.op_errstr);
         else
