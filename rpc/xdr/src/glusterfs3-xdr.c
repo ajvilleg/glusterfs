@@ -31,7 +31,7 @@
  * It was generated using rpcgen.
  */
 
-#include "rpc/xdr/src/glusterfs3-xdr.h"
+#include "glusterfs3-xdr.h"
 
 bool_t
 xdr_gf_statfs (XDR *xdrs, gf_statfs *objp)

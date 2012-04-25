@@ -3349,6 +3349,16 @@ server_writev (rpcsvc_request_t *req)
                                                 - sizeof(*xdp));
         xdl = ntohl(*xdp);
         if (xdl > 0) {
+                /*
+                 * I have no idea why we need to add two here.  That wasn't
+                 * necessary until very recently.  Best guess is that our
+                 * serialization added a two-byte separator (or padding?)
+                 * between xdata and the actual payload.  In any case, if we
+                 * don't do this then xdr_bytes fails. . .even though it
+                 * actually does allocate and fill the xdata structure, so
+                 * it not only breaks stuff but it leaks memory as well.
+                 */
+                xdl += 2;
                 if ((req->count < 2) || (req->msg[1].iov_len < xdl)) {
                         goto out;
                 }
@@ -3366,8 +3376,11 @@ server_writev (rpcsvc_request_t *req)
                 myiov = req->msg[0];
         }
         len = xdr_to_generic (myiov, &args, (xdrproc_t)xdr_gfs3_write_req);
-        if (len == 0) {
-                //failed to decode msg;
+        if (len <= 0) {
+                /*
+                 * Docs say this should return 0 or a real length, but it will
+                 * also return -1 in the bogus xdr_bytes case mentioned above.
+                 */
                 goto out;
         }
 
