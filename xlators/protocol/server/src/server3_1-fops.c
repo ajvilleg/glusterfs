@@ -1391,7 +1391,7 @@ server_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (op_ret >= 0) {
                 gf_stat_from_iatt (&rsp.prestat, prebuf);
                 gf_stat_from_iatt (&rsp.poststat, postbuf);
-        } else {
+        } else if (op_errno != EKEYEXPIRED) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": WRITEV %"PRId64" (%s) ==> %"PRId32" (%s)",
                         frame->root->unique, state->resolve.fd_no,
@@ -3320,23 +3320,60 @@ server_writev (rpcsvc_request_t *req)
         gfs3_write_req       args   = {{0,},};
         ssize_t              len    = 0;
         int                  i      = 0;
+        int                  j      = 0;
         int                  ret    = -1;
+        uint32_t            *xdp    = NULL;
+        uint32_t             xdl    = 0;
+        struct iovec         myiov  = {NULL,0};
         int                  op_errno = 0;
 
         if (!req)
                 return ret;
 
-        len = xdr_to_generic (req->msg[0], &args, (xdrproc_t)xdr_gfs3_write_req);
+        /*
+         * This got much more complicated because of xdata.  Xdr_to_generic
+         * expects the variable-length xdata to be in the same contiguous
+         * memory buffer as the fixed part, but currently only the length is
+         * present.  We can't fix it in xdr_to_generic because that's generated
+         * code (and likewise on the client side).  We can't fix it in the
+         * transport layer's vector_sizer code, because the only way it could
+         * give the correct length would be to parse the first part of the
+         * request before we've even finished reading it - not only awkward,
+         * but a heinous layering violation as well.  The easiest way to fix
+         * it is here, even though that means we have to make some assumptions
+         * (i.e. that the fixed/variable split is as described and that the
+         * xdata length comes last in the fixed part).
+         */
+        req->rpc_err = GARBAGE_ARGS;
+        xdp = (uint32_t *)(req->msg[0].iov_base + req->msg[0].iov_len
+                                                - sizeof(*xdp));
+        xdl = ntohl(*xdp);
+        if (xdl > 0) {
+                if ((req->count < 2) || (req->msg[1].iov_len < xdl)) {
+                        goto out;
+                }
+                myiov.iov_base = alloca(req->msg[0].iov_len+xdl);
+                if (!myiov.iov_base) {
+                        goto out;
+                }
+                myiov.iov_len = req->msg[0].iov_len + xdl;
+                memcpy (myiov.iov_base,req->msg[0].iov_base,
+                        req->msg[0].iov_len);
+                memcpy (myiov.iov_base+req->msg[0].iov_len,req->msg[1].iov_base,
+                        xdl);
+        }
+        else {
+                myiov = req->msg[0];
+        }
+        len = xdr_to_generic (myiov, &args, (xdrproc_t)xdr_gfs3_write_req);
         if (len == 0) {
                 //failed to decode msg;
-                req->rpc_err = GARBAGE_ARGS;
                 goto out;
         }
 
         frame = get_frame_from_request (req);
         if (!frame) {
                 // something wrong, mostly insufficient memory
-                req->rpc_err = GARBAGE_ARGS; /* TODO */
                 goto out;
         }
         frame->root->op = GF_FOP_WRITE;
@@ -3344,7 +3381,6 @@ server_writev (rpcsvc_request_t *req)
         state = CALL_STATE (frame);
         if (!state->conn->bound_xl) {
                 /* auth failure, request on subvolume without setvolume */
-                req->rpc_err = GARBAGE_ARGS;
                 goto out;
         }
 
@@ -3355,38 +3391,47 @@ server_writev (rpcsvc_request_t *req)
         state->iobref        = iobref_ref (req->iobref);
         memcpy (state->resolve.gfid, args.gfid, 16);
 
-        if (len < req->msg[0].iov_len) {
-                state->payload_vector[0].iov_base
-                        = (req->msg[0].iov_base + len);
-                state->payload_vector[0].iov_len
-                        = req->msg[0].iov_len - len;
-                state->payload_count = 1;
-        }
+        GF_PROTOCOL_DICT_UNSERIALIZE (state->conn->bound_xl, state->xdata,
+                                      (args.xdata.xdata_val),
+                                      (args.xdata.xdata_len), ret,
+                                      op_errno, dict_err);
 
-        for (i = 1; i < req->count; i++) {
-                state->payload_vector[state->payload_count++]
-                        = req->msg[i];
+        j = 0;
+        for (i = 0; i < req->count; ++i) {
+                if (len) {
+                        if (len >= req->msg[i].iov_len) {
+                                len -= req->msg[i].iov_len;
+                                continue;
+                        }
+                        state->payload_vector[j].iov_base
+                                = (req->msg[i].iov_base + len);
+                        state->payload_vector[j].iov_len
+                                = req->msg[i].iov_len - len;
+                        len = 0;
+                }
+                else {
+                        state->payload_vector[j] = req->msg[i];
+                }
+                ++j;
         }
-
+        state->payload_count = j;
+                 
         for (i = 0; i < state->payload_count; i++) {
                 state->size += state->payload_vector[i].iov_len;
         }
 
-        GF_PROTOCOL_DICT_UNSERIALIZE (state->conn->bound_xl, state->xdata,
-                                      (args.xdata.xdata_val),
-                                      (args.xdata.xdata_len), ret,
-                                      op_errno, out);
-
+        req->rpc_err = SUCCESS;
         ret = 0;
         resolve_and_resume (frame, server_writev_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
-
-        if (op_errno)
-                req->rpc_err = GARBAGE_ARGS;
-
-        return ret;
+       return ret;
+dict_err:
+        /*
+         * GF_PROTOCOL_DICT_UNSERIALIZE really doesn't report errors the
+         * right way for our purposes.  Undo its damage.
+         */
+        req->rpc_err = GARBAGE_ARGS;
+        return -1;
 }
 
 

@@ -416,6 +416,7 @@ afr_sh_data_erase_pending (call_frame_t *frame, xlator_t *this)
         int              call_count = 0;
         int              i = 0;
         dict_t          **erase_xattr = NULL;
+        dict_t          *xdict;
 
         local = frame->local;
         sh = &local->self_heal;
@@ -439,6 +440,12 @@ afr_sh_data_erase_pending (call_frame_t *frame, xlator_t *this)
                 }
         }
 
+        xdict = dict_new();
+        if (xdict) {
+                i = dict_set_uint32 (xdict, "trusted.afr.self-heal-erase",
+                                     ('U'<<24) | ('B'<<16) | ('E'<<8) | 'T');
+        }
+
         afr_sh_delta_to_xattr (priv, sh->delta_matrix, erase_xattr,
                                priv->child_count, AFR_DATA_TRANSACTION);
 
@@ -458,7 +465,7 @@ afr_sh_data_erase_pending (call_frame_t *frame, xlator_t *this)
                                    priv->children[i]->fops->fxattrop,
                                    sh->healing_fd,
                                    GF_XATTROP_ADD_ARRAY, erase_xattr[i],
-                                   NULL);
+                                   xdict);
                 if (!--call_count)
                         break;
         }
@@ -467,6 +474,9 @@ afr_sh_data_erase_pending (call_frame_t *frame, xlator_t *this)
                 if (erase_xattr[i]) {
                         dict_unref (erase_xattr[i]);
                 }
+        }
+        if (xdict) {
+                dict_unref(xdict);
         }
         GF_FREE (erase_xattr);
 

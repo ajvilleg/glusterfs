@@ -35,9 +35,9 @@ rpc_clnt_prog_t clnt3_1_fop_prog;
 int
 client_submit_vec_request (xlator_t  *this, void *req, call_frame_t  *frame,
                            rpc_clnt_prog_t *prog, int procnum,
-                           fop_cbk_fn_t cbkfn,
-                           struct iovec  *payload, int payloadcnt,
-                           struct iobref *iobref, xdrproc_t xdrproc)
+                           fop_cbk_fn_t cbkfn, struct iovec  *payload,
+                           int payloadcnt, struct iobref *iobref,
+                           xdrproc_t xdrproc)
 {
         int             ret        = 0;
         clnt_conf_t    *conf       = NULL;
@@ -799,7 +799,7 @@ client3_1_writev_cbk (struct rpc_req *req, struct iovec *iov, int count,
                 goto out;
         }
 
-        ret = xdr_to_generic (*iov, &rsp, (xdrproc_t)xdr_gfs3_truncate_rsp);
+        ret = xdr_to_generic (*iov, &rsp, (xdrproc_t)xdr_gfs3_write_rsp);
         if (ret < 0) {
                 gf_log (this->name, GF_LOG_ERROR, "XDR decoding failed");
                 rsp.op_ret   = -1;
@@ -817,7 +817,7 @@ client3_1_writev_cbk (struct rpc_req *req, struct iovec *iov, int count,
                                       rsp.op_errno, out);
 
 out:
-        if (rsp.op_ret == -1) {
+        if ((rsp.op_ret == -1) && (rsp.op_errno != EKEYEXPIRED)) {
                 gf_log (this->name, GF_LOG_WARNING, "remote operation failed: %s",
                         strerror (gf_error_to_errno (rsp.op_errno)));
         }
@@ -3223,10 +3223,11 @@ client3_1_readlink (call_frame_t *frame, xlator_t *this,
 
         args = data;
 
-        if (!(args->loc && args->loc->inode))
+        if (!args->loc) {
                 goto unwind;
+        }
 
-        if (!uuid_is_null (args->loc->inode->gfid))
+        if (args->loc->inode && !uuid_is_null (args->loc->inode->gfid))
                 memcpy (req.gfid,  args->loc->inode->gfid, 16);
         else
                 memcpy (req.gfid, args->loc->gfid, 16);
@@ -3990,6 +3991,9 @@ client3_1_writev (call_frame_t *frame, xlator_t *this, void *data)
 
         memcpy (req.gfid, args->fd->inode->gfid, 16);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
+                                    req.xdata.xdata_len, op_errno, unwind);
+
         ret = client_submit_vec_request (this, &req, frame, conf->fops,
                                          GFS3_OP_WRITE, client3_1_writev_cbk,
                                          args->vector, args->count,
@@ -4363,10 +4367,10 @@ client3_1_setxattr (call_frame_t *frame, xlator_t *this,
 
         args = data;
 
-        if (!(args->loc && args->loc->inode))
+        if (!args->loc)
                 goto unwind;
 
-        if (!uuid_is_null (args->loc->inode->gfid))
+        if (args->loc->inode && !uuid_is_null (args->loc->inode->gfid))
                 memcpy (req.gfid,  args->loc->inode->gfid, 16);
         else
                 memcpy (req.gfid, args->loc->gfid, 16);

@@ -639,7 +639,7 @@ afr_unlock_inodelk (call_frame_t *frame, xlator_t *this)
                                 goto wind;
                         }
 
-                        piggyback = 0;
+                        piggyback = priv->fast_path;
 
                         LOCK (&local->fd->lock);
                         {
@@ -1496,7 +1496,7 @@ afr_nonblocking_inodelk (call_frame_t *frame, xlator_t *this)
                                 goto wind;
                         }
 
-                        piggyback = 0;
+                        piggyback = priv->fast_path;
                         local->transaction.eager_lock[i] = 1;
 
                         LOCK (&local->fd->lock);
