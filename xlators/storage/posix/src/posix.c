@@ -1890,9 +1890,6 @@ out:
         return 0;
 }
 
-#define ALIGN_BUF(ptr,bound) ((void *)((unsigned long)(ptr + bound - 1) & \
-                                       (unsigned long)(~(bound - 1))))
-
 int
 posix_readv (call_frame_t *frame, xlator_t *this,
              fd_t *fd, size_t size, off_t offset, uint32_t flags, dict_t *xdata)
@@ -2055,7 +2052,7 @@ __posix_writev (int fd, struct iovec *vector, int count, off_t startoff,
         internal_off = startoff;
         for (idx = 0; idx < count; idx++) {
                 /* page aligned buffer */
-                buf = ALIGN_BUF (alloc_buf, align);
+                buf = GF_ALIGN_BUF (alloc_buf, align);
 
                 memcpy (buf, vector[idx].iov_base, vector[idx].iov_len);
 
@@ -2474,8 +2471,7 @@ posix_getxattr (call_frame_t *frame, xlator_t *this,
                 }
         }
 
-        /* Get the total size */
-        dict = get_new_dict ();
+        dict = dict_new ();
         if (!dict) {
                 goto out;
         }
@@ -2568,10 +2564,22 @@ posix_getxattr (call_frame_t *frame, xlator_t *this,
                 strcpy (key, name);
 
                 size = sys_lgetxattr (real_path, key, NULL, 0);
-                if (size == -1) {
-                        op_ret = -1;
+                if (size <= 0) {
                         op_errno = errno;
-                        goto out;
+                        if ((op_errno == ENOTSUP) || (op_errno == ENOSYS)) {
+                                GF_LOG_OCCASIONALLY (gf_posix_xattr_enotsup_log,
+                                                     this->name, GF_LOG_WARNING,
+                                                     "Extended attributes not "
+                                                     "supported (try remounting"
+                                                     " brick with 'user_xattr' "
+                                                     "flag)");
+                        } else {
+                                gf_log (this->name, GF_LOG_ERROR,
+                                        "getxattr failed on %s: %s (%s)",
+                                        real_path, key, strerror (op_errno));
+                        }
+
+                        goto done;
                 }
                 value = GF_CALLOC (size + 1, sizeof(char), gf_posix_mt_char);
                 if (!value) {
@@ -2599,7 +2607,9 @@ posix_getxattr (call_frame_t *frame, xlator_t *this,
                         GF_LOG_OCCASIONALLY (gf_posix_xattr_enotsup_log,
                                              this->name, GF_LOG_WARNING,
                                              "Extended attributes not "
-                                             "supported.");
+                                             "supported (try remounting"
+                                             " brick with 'user_xattr' "
+                                             "flag)");
                 }
                 else {
                         gf_log (this->name, GF_LOG_ERROR,
@@ -2660,7 +2670,6 @@ done:
 
         if (dict) {
                 dict_del (dict, GFID_XATTR_KEY);
-                dict_ref (dict);
         }
 
 out:
@@ -2729,6 +2738,11 @@ posix_fgetxattr (call_frame_t *frame, xlator_t *this,
                 strcpy (key, name);
 
                 size = sys_fgetxattr (_fd, key, NULL, 0);
+                if (size <= 0) {
+                        op_errno = errno;
+                        goto done;
+                }
+
                 value = GF_CALLOC (size + 1, sizeof(char), gf_posix_mt_char);
                 if (!value) {
                         op_ret = -1;
@@ -2754,7 +2768,8 @@ posix_fgetxattr (call_frame_t *frame, xlator_t *this,
                         GF_LOG_OCCASIONALLY (gf_posix_xattr_enotsup_log,
                                              this->name, GF_LOG_WARNING,
                                              "Extended attributes not "
-                                             "supported.");
+                                             "supported (try remounting "
+                                             "brick with 'user_xattr' flag)");
                 }
                 else {
                         gf_log (this->name, GF_LOG_ERROR,
