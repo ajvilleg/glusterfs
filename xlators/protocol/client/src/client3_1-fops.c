@@ -1049,6 +1049,13 @@ client3_1_getxattr_cbk (struct rpc_req *req, struct iovec *iov, int count,
                                       op_errno, out);
 
 out:
+#if defined(STUPIDSTUPIDSTUPID)
+        /*
+         * No, this does not $#@! well deserve a warning.  It just might not
+         * exist, OK?  Logging this every time has a severe performance impact,
+         * and by the way the use of local->loc.path is FUBAR since the GFID
+         * changes went in.
+         */
         if (rsp.op_ret == -1) {
                 gf_log (this->name, ((op_errno == ENOTSUP) ?
                                      GF_LOG_DEBUG : GF_LOG_WARNING),
@@ -1056,6 +1063,7 @@ out:
                         strerror (op_errno),
                         (local) ? local->loc.path : "--");
         }
+#endif
 
         CLIENT_STACK_UNWIND (getxattr, frame, rsp.op_ret, op_errno, dict, xdata);
 

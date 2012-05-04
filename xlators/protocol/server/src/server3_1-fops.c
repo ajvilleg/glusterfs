@@ -811,12 +811,18 @@ out:
         rsp.op_ret        = op_ret;
         rsp.op_errno      = gf_errno_to_error (op_errno);
 
+#if defined(STUPIDSTUPIDSTUPID)
+        /*
+         * See comment in client3_1_getxattr_cbk about why logging this is
+         * stupid and broken there.  It's stupid and broken here too.
+         */
         if (op_ret == -1)
                 gf_log (this->name, ((op_errno == ENOTSUP) ?
                                      GF_LOG_DEBUG : GF_LOG_INFO),
                         "%"PRId64": GETXATTR %s (%s) ==> %"PRId32" (%s)",
                         frame->root->unique, state->loc.path,
                         state->name, op_ret, strerror (op_errno));
+#endif
 
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_getxattr_rsp);
@@ -3355,16 +3361,9 @@ server_writev (rpcsvc_request_t *req)
                                                 - sizeof(*xdp));
         xdl = ntohl(*xdp);
         if (xdl > 0) {
-                /*
-                 * I have no idea why we need to add two here.  That wasn't
-                 * necessary until very recently.  Best guess is that our
-                 * serialization added a two-byte separator (or padding?)
-                 * between xdata and the actual payload.  In any case, if we
-                 * don't do this then xdr_bytes fails. . .even though it
-                 * actually does allocate and fill the xdata structure, so
-                 * it not only breaks stuff but it leaks memory as well.
-                 */
-                xdl += 2;
+                if (xdl % 4) {
+                        xdl = (xdl + 3) & ~3; /* Round up. */
+                }
                 if ((req->count < 2) || (req->msg[1].iov_len < xdl)) {
                         goto out;
                 }

@@ -418,7 +418,7 @@ helper_fxattrop (call_frame_t *frame, xlator_t *this, fd_t *fd,
         uint32_t         sh_version = 0;
         data_t          *data = NULL;
 
-        if (inode_ctx_get(fd->inode,this,&ctx_int) == 0) {
+        if (xdata && (inode_ctx_get(fd->inode,this,&ctx_int) == 0)) {
                 ctx_ptr = CAST2PTR(ctx_int);
                 if (!dict_get_uint32(xdata,"hsrepl.heal-vers",&sh_version)) {
                         if (sh_version != ctx_ptr->sh_version) {
