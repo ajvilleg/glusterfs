@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2007-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #include <libgen.h>
@@ -173,6 +164,8 @@ reconfigure (xlator_t *this, dict_t *options)
         GF_OPTION_RECONF ("quorum-count", priv->quorum_count, options,
                           uint32, out);
         fix_quorum_options(this,priv,qtype);
+        GF_OPTION_RECONF ("heal-timeout", priv->shd.timeout, options,
+                          int32, out);
 
         GF_OPTION_RECONF ("fast-path", priv->fast_path, options, bool, out);
         if (priv->fast_path) {
@@ -418,17 +411,12 @@ init (xlator_t *this)
         if (!priv->shd.split_brain)
                 goto out;
 
-        priv->shd.sh_times = GF_CALLOC (priv->child_count,
-                                        sizeof (*priv->shd.sh_times),
-                                        gf_afr_mt_time_t);
-        if (!priv->shd.sh_times)
-                goto out;
-
         this->itable = inode_table_new (SHD_INODE_LRU_LIMIT, this);
         if (!this->itable)
                 goto out;
         priv->root_inode = inode_ref (this->itable->root);
         GF_OPTION_INIT ("node-uuid", priv->shd.node_uuid, str, out);
+        GF_OPTION_INIT ("heal-timeout", priv->shd.timeout, int32, out);
 
         ret = 0;
 out:
@@ -627,6 +615,13 @@ struct volume_options options[] = {
         { .key  = {"node-uuid"},
           .type = GF_OPTION_TYPE_STR,
           .description = "Local glusterd uuid string",
+        },
+        { .key  = {"heal-timeout"},
+          .type = GF_OPTION_TYPE_INT,
+          .min  = 60,
+          .max  = INT_MAX,
+          .default_value = "600",
+          .description = "Poll timeout for checking the need to self-heal"
         },
         { .key  = {NULL} },
 };

@@ -1,20 +1,11 @@
 /*
-   Copyright (c) 2006-2011 Gluster, Inc. <http://www.gluster.com>
-   This file is part of GlusterFS.
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
+  This file is part of GlusterFS.
 
-   GlusterFS is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published
-   by the Free Software Foundation; either version 3 of the License,
-   or (at your option) any later version.
-
-   GlusterFS is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-   General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program.  If not, see
-   <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef _GLUSTERFS_H
@@ -82,6 +73,7 @@
 #define GF_XATTR_CLRLK_CMD      "glusterfs.clrlk"
 #define GF_XATTR_PATHINFO_KEY   "trusted.glusterfs.pathinfo"
 #define GF_XATTR_NODE_UUID_KEY  "trusted.glusterfs.node-uuid"
+#define GF_XATTR_VOL_ID_KEY   "trusted.glusterfs.volume-id"
 
 #define XATTR_IS_PATHINFO(x)  (strncmp (x, GF_XATTR_PATHINFO_KEY,       \
                                         strlen (GF_XATTR_PATHINFO_KEY)) == 0)

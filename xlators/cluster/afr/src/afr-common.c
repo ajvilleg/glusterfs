@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2007-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #include <libgen.h>
@@ -679,8 +670,11 @@ afr_get_call_child (xlator_t *this, unsigned char *child_up, int32_t read_child,
         GF_ASSERT (call_child);
         GF_ASSERT (last_index);
         GF_ASSERT (fresh_children);
-        GF_ASSERT (read_child >= 0);
 
+        if (read_child < 0) {
+                ret = -EIO;
+                goto out;
+        }
         priv = this->private;
         *call_child = -1;
         *last_index = -1;
@@ -804,6 +798,8 @@ afr_local_transaction_cleanup (afr_local_t *local, xlator_t *this)
         priv = this->private;
 
         afr_matrix_cleanup (local->pending, priv->child_count);
+        afr_matrix_cleanup (local->transaction.txn_changelog,
+                            priv->child_count);
 
         if (local->internal_lock.locked_nodes)
                 GF_FREE (local->internal_lock.locked_nodes);
@@ -819,7 +815,6 @@ afr_local_transaction_cleanup (afr_local_t *local, xlator_t *this)
 
 
         GF_FREE (local->transaction.pre_op);
-        GF_FREE (local->transaction.child_errno);
         GF_FREE (local->transaction.eager_lock);
 
         GF_FREE (local->transaction.basename);
@@ -2119,7 +2114,7 @@ afr_lookup (call_frame_t *frame, xlator_t *this,
         frame->local = local;
         local->fop = GF_FOP_LOOKUP;
 
-        if (!strcmp (loc->path, "/" GF_REPLICATE_TRASH_DIR)) {
+        if (loc->path && !strcmp (loc->path, "/" GF_REPLICATE_TRASH_DIR)) {
                 op_errno = ENOENT;
                 goto out;
         }
@@ -3930,12 +3925,10 @@ afr_transaction_local_init (afr_local_t *local, xlator_t *this)
         if (!local->pending)
                 goto out;
 
-        local->transaction.child_errno =
-                GF_CALLOC (sizeof (*local->transaction.child_errno),
-                           priv->child_count,
-                           gf_afr_mt_int32_t);
-        local->transaction.erase_pending = 1;
-
+        local->transaction.txn_changelog = afr_matrix_create (priv->child_count,
+                                                           AFR_NUM_CHANGE_LOGS);
+        if (!local->transaction.txn_changelog)
+                goto out;
         ret = 0;
 out:
         return ret;
@@ -4109,7 +4102,6 @@ afr_priv_destroy (afr_private_t *priv)
         GF_FREE (priv->shd.pos);
         GF_FREE (priv->shd.pending);
         GF_FREE (priv->shd.inprogress);
-        GF_FREE (priv->shd.sh_times);
 //        for (i = 0; i < priv->child_count; i++)
 //                if (priv->shd.timer && priv->shd.timer[i])
 //                        gf_timer_call_cancel (this->ctx, priv->shd.timer[i]);

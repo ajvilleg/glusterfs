@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2007-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef _CONFIG_H
@@ -851,6 +842,11 @@ __inode_link (inode_t *inode, inode_t *parent, const char *name,
                 }
         }
 
+        if (name) {
+                if (!strcmp(name, ".") || !strcmp(name, ".."))
+                        return link_inode;
+        }
+
         /* use only link_inode beyond this point */
         if (parent) {
                 old_dentry = __dentry_grep (table, parent, name);
@@ -1090,8 +1086,9 @@ __inode_path (inode_t *inode, const char *name, char **bufp)
         int            len   = 0;
         char          *buf   = NULL;
 
-        if (!inode) {
-                gf_log_callingfn (THIS->name, GF_LOG_WARNING, "inode not found");
+        if (!inode || uuid_is_null (inode->gfid)) {
+                GF_ASSERT (0);
+                gf_log_callingfn (THIS->name, GF_LOG_WARNING, "invalid inode");
                 return -1;
         }
 
@@ -1148,7 +1145,7 @@ __inode_path (inode_t *inode, const char *name, char **bufp)
 
                 if (!__is_root_gfid (itrav->gfid)) {
                         snprintf (&buf[i-GFID_STR_PFX_LEN], GFID_STR_PFX_LEN,
-                                  "<gfid:%s>", uuid_utoa (itrav->gfid));
+                                  INODE_PATH_FMT, uuid_utoa (itrav->gfid));
                         buf[i-1] = '>';
                 }
 

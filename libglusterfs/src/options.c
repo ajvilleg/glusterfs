@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2010-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef _CONFIG_H
@@ -773,8 +764,11 @@ xl_opt_validate (dict_t *dict, char *key, data_t *value, void *data)
         vol_opt = stub->vol_opt;
 
         opt = xlator_volume_option_get_list (vol_opt, key);
-        if (!opt)
+        if (!opt) {
+                gf_log (__func__, GF_LOG_WARNING,
+                        "could not find %s in option list", key);
                 return;
+        }
 
         ret = xlator_option_validate (xl, key, value->data, opt, &errstr);
         if (ret)
@@ -813,6 +807,8 @@ xlator_options_validate_list (xlator_t *xl, dict_t *options,
 
         dict_foreach (options, xl_opt_validate, &stub);
         if (stub.errstr) {
+                gf_log (xl->name, GF_LOG_WARNING, "could not validate as %s",
+                        xl->type);
                 ret = -1;
                 if (op_errstr)
                         *op_errstr = stub.errstr;

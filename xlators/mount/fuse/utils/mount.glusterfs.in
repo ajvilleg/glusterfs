@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # (C) 2006, 2007, 2008 Gluster Inc. <http://www.gluster.com>
 #
 # This program is free software; you can redistribute it and/or
@@ -31,7 +31,28 @@ _init ()
     exec_prefix=@exec_prefix@;
     cmd_line=$(echo "@sbindir@/glusterfs");
 
+    case `uname -s` in
+    NetBSD)
+        getinode="stat -f %i"
+        getdev="stat -f %d"
+        lgetinode="${getinode} -L"
+        lgetdev="${getdev} -L"
+
+        mounttab=/proc/mounts
+        ;;
+    Linux)
+        getinode="stat -c $i"
+        getdev="stat -c $d"
+        lgetinode="${getinode} -L"
+        lgetdev="${getdev} -L"
+
+        mounttab=/etc/mtab
+        ;;
+    esac
+
     UPDATEDBCONF=/etc/updatedb.conf
+    LD_LIBRARY_PATH=@libdir@:${LD_LIBRARY_PATH}
+    export LD_LIBRARY_PATH
 }
 
 # Mount happens asynchronously, so the command status alone will never be
@@ -50,7 +71,7 @@ wait_for ()
                 umount $mount_point &> /dev/null
                 exit 1
         fi
-        inode=$(stat -c %i $mount_point 2>/dev/null);
+        inode=$( ${getinode} $mount_point 2>/dev/null);
         if [ "$inode" = "1" ]; then
             break
         fi
@@ -233,11 +254,11 @@ check_recursive_mount ()
         return;
     fi
 
-    brick_path=(`grep ^path "$GLUSTERD_WORKDIR"/vols/*/bricks/* | cut -d "=" -f 2`);
-    root_inode=`stat -Lc %i /`;
-    root_dev=`stat -Lc %d /`;
-    mnt_inode=`stat -Lc %i $mnt_dir`;
-    mnt_dev=`stat -Lc %d $mnt_dir`;
+    brick_path=`grep ^path "$GLUSTERD_WORKDIR"/vols/*/bricks/* | cut -d "=" -f 2`;
+    root_inode=`${lgetinode} /`;
+    root_dev=`${lgetdev} /`;
+    mnt_inode=`${lgetinode} $mnt_dir`;
+    mnt_dev=`${lgetdev} $mnt_dir`;
     for brick in "$brick_path";
     do
         # evaluate brick path to see if this is local, if non-local, skip iteration
@@ -254,8 +275,8 @@ check_recursive_mount ()
             do
                 tmp_brick="$brick";
                 brick="$brick"/..;
-                brick_dev=`stat -Lc %d $brick`;
-                brick_inode=`stat -Lc %i $brick`;
+                brick_dev=`${lgetdev} $brick`;
+                brick_inode=`${gletdev} $brick`;
                 if [ "$mnt_inode" -eq "$brick_inode" -a "$mnt_dev" -eq "$brick_dev" ]; then
                     echo ERROR: $mnt_dir is a parent of the brick $tmp_brick;
                     exit 2;
@@ -283,10 +304,10 @@ main ()
                     # "mount -t glusterfs" sends this, but it's useless.
                     "rw")       ;;
                     *)
-                        read key value < <(echo "$pair" | tr "=" " ")
+                        (echo "$pair" | tr "=" " ")|read key value
                         # Handle options with values.
                         case "$key" in
-                            "log-level")        new_log_level=$value ;;
+                            "log-level")        log_level_str=$value ;;
                             "log-file")         log_file=$value ;;
                             "transport")        transport=$value ;;
                             "direct-io-mode")   direct_io_mode=$value ;;
@@ -344,7 +365,7 @@ main ()
     }
 
     # Simple check to avoid multiple identical mounts
-    if grep -q " $mount_point fuse" /etc/mtab; then
+    if grep -q " ${mount_point}.*fuse" $mounttab; then
         echo -n "$0: according to mtab, GlusterFS is already mounted on "
         echo "$mount_point"
         exit 0;

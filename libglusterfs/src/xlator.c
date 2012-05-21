@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2006-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef _CONFIG_H
@@ -552,6 +543,42 @@ loc_wipe (loc_t *loc)
         memset (loc, 0, sizeof (*loc));
 }
 
+int
+loc_path (loc_t *loc, const char *bname)
+{
+        int     ret = 0;
+
+        if (loc->path)
+                goto out;
+
+        ret = -1;
+
+        if (bname && !strlen (bname))
+                bname = NULL;
+
+        if (!bname)
+                goto inode_path;
+
+        if (loc->parent && !uuid_is_null (loc->parent->gfid)) {
+                ret = inode_path (loc->parent, bname, (char**)&loc->path);
+        } else if (!uuid_is_null (loc->pargfid)) {
+                ret = gf_asprintf ((char**)&loc->path, INODE_PATH_FMT"/%s",
+                                   uuid_utoa (loc->pargfid), bname);
+        }
+
+        if (loc->path)
+                goto out;
+
+inode_path:
+        if (loc->inode && !uuid_is_null (loc->inode->gfid)) {
+                ret = inode_path (loc->inode, NULL, (char **)&loc->path);
+        } else if (!uuid_is_null (loc->gfid)) {
+                ret = gf_asprintf ((char**)&loc->path, INODE_PATH_FMT,
+                                   uuid_utoa (loc->gfid));
+        }
+out:
+        return ret;
+}
 
 int
 loc_copy (loc_t *dst, loc_t *src)

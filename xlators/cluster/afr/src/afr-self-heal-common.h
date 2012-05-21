@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2008-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef __AFR_SELF_HEAL_COMMON_H__
@@ -61,7 +52,7 @@ afr_mark_sources (xlator_t *this, int32_t *sources, int32_t **pending_matrix,
                   int32_t *success_children, int32_t *subvol_status);
 
 int
-afr_sh_delta_to_xattr (afr_private_t *priv,
+afr_sh_delta_to_xattr (xlator_t *this,
                        int32_t *delta_matrix[], dict_t *xattr[],
 		       int child_count, afr_transaction_type type);
 
@@ -131,4 +122,7 @@ afr_sh_reset (call_frame_t *frame, xlator_t *this);
 void
 afr_children_intersection_get (int32_t *set1, int32_t *set2,
                                int *intersection, unsigned int child_count);
+int
+afr_get_no_xattr_dir_read_child (xlator_t *this, int32_t *success_children,
+                                 struct iatt *bufs);
 #endif /* __AFR_SELF_HEAL_COMMON_H__ */

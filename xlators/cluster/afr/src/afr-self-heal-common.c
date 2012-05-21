@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2008-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #include "glusterfs.h"
@@ -550,6 +541,78 @@ out:
         return nsources;
 }
 
+int
+afr_get_no_xattr_dir_read_child (xlator_t *this, int32_t *success_children,
+                                 struct iatt *bufs)
+{
+        afr_private_t *priv = NULL;
+        int            i = 0;
+        int            child = -1;
+        int            read_child = -1;
+
+        priv = this->private;
+        for (i = 0; i < priv->child_count; i++) {
+                child = success_children[i];
+                if (child < 0)
+                        break;
+                if (read_child < 0)
+                        read_child = child;
+                else if (bufs[read_child].ia_size < bufs[child].ia_size)
+                        read_child = child;
+        }
+        return read_child;
+}
+
+int
+afr_sh_mark_zero_size_file_as_sink (struct iatt *bufs, int32_t *success_children,
+                                    int child_count, int32_t *sources)
+{
+        int             nsources = 0;
+        int             i = 0;
+        int             child = 0;
+        gf_boolean_t    sink_exists = _gf_false;
+        gf_boolean_t    source_exists = _gf_false;
+        int             source = -1;
+
+        for (i = 0; i < child_count; i++) {
+                child = success_children[i];
+                if (child < 0)
+                        break;
+                if (!bufs[child].ia_size) {
+                        sink_exists = _gf_true;
+                        continue;
+                }
+                if (!source_exists) {
+                        source_exists = _gf_true;
+                        source = child;
+                        continue;
+                }
+                if (bufs[source].ia_size != bufs[child].ia_size) {
+                        nsources = -1;
+                        goto out;
+                }
+        }
+        if (!source_exists && !sink_exists) {
+                nsources = -1;
+                goto out;
+        }
+
+        if (!source_exists || !sink_exists)
+                goto out;
+
+        for (i = 0; i < child_count; i++) {
+                child = success_children[i];
+                if (child < 0)
+                        break;
+                if (bufs[child].ia_size) {
+                        sources[child] = 1;
+                        nsources++;
+                }
+        }
+out:
+        return nsources;
+}
+
 char *
 afr_get_character_str (afr_node_type type)
 {
@@ -715,11 +778,24 @@ afr_mark_sources (xlator_t *this, int32_t *sources, int32_t **pending_matrix,
         afr_find_character_types (characters, pending_matrix, success_children,
                                   child_count);
         if (afr_sh_all_nodes_innocent (characters, child_count)) {
-                if (type == AFR_SELF_HEAL_METADATA)
+                switch (type) {
+                case AFR_SELF_HEAL_METADATA:
                         nsources = afr_sh_mark_lowest_uid_as_source (bufs,
                                                              success_children,
                                                              child_count,
                                                              sources);
+                        break;
+                case AFR_SELF_HEAL_DATA:
+                        nsources = afr_sh_mark_zero_size_file_as_sink (bufs,
+                                                             success_children,
+                                                             child_count,
+                                                             sources);
+                        if ((nsources < 0) && subvol_status)
+                                *subvol_status |= SPLIT_BRAIN;
+                        break;
+                default:
+                        break;
+                }
                 goto out;
         }
 
@@ -771,20 +847,24 @@ afr_sh_pending_to_delta (afr_private_t *priv, dict_t **xattr,
 
 
 int
-afr_sh_delta_to_xattr (afr_private_t *priv,
+afr_sh_delta_to_xattr (xlator_t *this,
                        int32_t *delta_matrix[], dict_t *xattr[],
                        int child_count, afr_transaction_type type)
 {
-        int      i       = 0;
-        int      j       = 0;
-        int      k       = 0;
-        int      ret     = 0;
-        int32_t *pending = NULL;
+        int              i       = 0;
+        int              j       = 0;
+        int              k       = 0;
+        int              ret     = 0;
+        int32_t         *pending = NULL;
+        int32_t         *local_pending = NULL;
+        afr_private_t   *priv = NULL;
 
+        priv = this->private;
         for (i = 0; i < child_count; i++) {
                 if (!xattr[i])
                         continue;
 
+                local_pending = NULL;
                 for (j = 0; j < child_count; j++) {
                         pending = GF_CALLOC (sizeof (int32_t), 3,
                                              gf_afr_mt_int32_t);
@@ -797,12 +877,28 @@ afr_sh_delta_to_xattr (afr_private_t *priv,
 
                         pending[k] = hton32 (delta_matrix[i][j]);
 
+                        if (j == i) {
+                                local_pending = pending;
+                                continue;
+                        }
                         ret = dict_set_bin (xattr[i], priv->pending_key[j],
                                             pending,
-                                            3 * sizeof (int32_t));
-                        if (ret < 0)
-                                gf_log (THIS->name, GF_LOG_WARNING,
+                                        AFR_NUM_CHANGE_LOGS * sizeof (int32_t));
+                        if (ret < 0) {
+                                gf_log (this->name, GF_LOG_WARNING,
                                         "Unable to set dict value.");
+                                GF_FREE (pending);
+                        }
+                }
+                if (local_pending) {
+                        ret = dict_set_bin (xattr[i], priv->pending_key[i],
+                                            local_pending,
+                                        AFR_NUM_CHANGE_LOGS * sizeof (int32_t));
+                        if (ret < 0) {
+                                gf_log (this->name, GF_LOG_WARNING,
+                                        "Unable to set dict value.");
+                                GF_FREE (local_pending);
+                        }
                 }
         }
         return 0;
@@ -1212,6 +1308,10 @@ afr_sh_missing_entries_lookup_done (call_frame_t *frame, xlator_t *this,
         ia_type_t       ia_type = IA_INVAL;
         int32_t         nsources = 0;
         loc_t           *loc = NULL;
+        int32_t         subvol_status = 0;
+        afr_transaction_type txn_type = AFR_DATA_TRANSACTION;
+        gf_boolean_t    split_brain = _gf_false;
+        int             read_child = -1;
 
         local = frame->local;
         sh = &local->self_heal;
@@ -1227,17 +1327,38 @@ afr_sh_missing_entries_lookup_done (call_frame_t *frame, xlator_t *this,
 
         //now No chance for the ia_type to conflict
         ia_type = sh->buf[sh->success_children[0]].ia_type;
+        txn_type = afr_transaction_type_get (ia_type);
         nsources = afr_build_sources (this, sh->xattr, sh->buf,
                                       sh->pending_matrix, sh->sources,
-                                      sh->success_children,
-                                      afr_transaction_type_get (ia_type),
-                                      NULL, _gf_false);
+                                      sh->success_children, txn_type,
+                                      &subvol_status, _gf_false);
         if (nsources < 0) {
                 gf_log (this->name, GF_LOG_INFO, "No sources for dir of %s,"
                         " in missing entry self-heal, continuing with the rest"
                         " of the self-heals", local->loc.path);
-                op_errno = EIO;
-                goto out;
+                if (subvol_status & SPLIT_BRAIN) {
+                        split_brain = _gf_true;
+                        switch (txn_type) {
+                        case AFR_DATA_TRANSACTION:
+                                nsources = 1;
+                                sh->sources[sh->success_children[0]] = 1;
+                                break;
+                        case AFR_ENTRY_TRANSACTION:
+                                read_child = afr_get_no_xattr_dir_read_child
+                                                          (this,
+                                                           sh->success_children,
+                                                           sh->buf);
+                                sh->sources[read_child] = 1;
+                                nsources = 1;
+                                break;
+                        default:
+                                op_errno = EIO;
+                                goto out;
+                        }
+                } else {
+                        op_errno = EIO;
+                        goto out;
+                }
         }
 
         afr_get_fresh_children (sh->success_children, sh->sources,
@@ -1254,7 +1375,11 @@ afr_sh_missing_entries_lookup_done (call_frame_t *frame, xlator_t *this,
         sh->type = sh->buf[sh->source].ia_type;
         if (uuid_is_null (loc->inode->gfid))
                 uuid_copy (loc->gfid, sh->buf[sh->source].ia_gfid);
-        sh_missing_entries_create (frame, this);
+        if (split_brain) {
+                afr_sh_missing_entries_finish (frame, this);
+        } else {
+                sh_missing_entries_create (frame, this);
+        }
         return;
 out:
         sh->op_failed = 1;

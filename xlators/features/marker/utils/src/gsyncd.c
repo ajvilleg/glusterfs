@@ -27,6 +27,8 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/param.h> /* for PATH_MAX */
+
 
 #include "common-utils.h"
 #include "run.h"
@@ -159,6 +161,7 @@ static int
 find_gsyncd (pid_t pid, pid_t ppid, char *name, void *data)
 {
         char buf[NAME_MAX * 2] = {0,};
+        char path[PATH_MAX]    = {0,};
         char *p                = NULL;
         int zeros              = 0;
         int ret                = 0;
@@ -168,13 +171,8 @@ find_gsyncd (pid_t pid, pid_t ppid, char *name, void *data)
         if (ppid != pida[0])
                 return 0;
 
-        ret = gf_asprintf (&p, PROC"/%d/cmdline", pid);
-        if (ret == -1) {
-                fprintf (stderr, "out of memory\n");
-                return -1;
-        }
-
-        fd = open (p, O_RDONLY);
+        sprintf (path, PROC"/%d/cmdline", pid);
+        fd = open (path, O_RDONLY);
         if (fd == -1)
                 return 0;
         ret = read (fd, buf, sizeof (buf));
@@ -213,7 +211,7 @@ static int
 invoke_rsync (int argc, char **argv)
 {
         int i                  = 0;
-        char *p                = NULL;
+        char path[PATH_MAX]    = {0,};
         pid_t pid              = -1;
         pid_t ppid             = -1;
         pid_t pida[]           = {-1, -1};
@@ -240,8 +238,11 @@ invoke_rsync (int argc, char **argv)
                         fprintf (stderr, "sshd ancestor not found\n");
                         goto error;
                 }
-                if (strcmp (name, "sshd") == 0)
+                if (strcmp (name, "sshd") == 0) {
+                        GF_FREE (name);
                         break;
+                }
+                GF_FREE (name);
         }
         /* look up "ssh-sibling" gsyncd */
         pida[0] = pid;
@@ -251,15 +252,12 @@ invoke_rsync (int argc, char **argv)
                 goto error;
         }
         /* check if rsync target matches gsyncd target */
-        if (gf_asprintf (&p, PROC"/%d/cwd", pida[1]) == -1) {
-                fprintf (stderr, "out of memory\n");
-                goto error;
-        }
-        ret = readlink (p, buf, sizeof (buf));
+        sprintf (path, PROC"/%d/cwd", pida[1]);
+        ret = readlink (path, buf, sizeof (buf));
         if (ret == -1 || ret == sizeof (buf))
                 goto error;
         if (strcmp (argv[argc - 1], "/") == 0 /* root dir cannot be a target */ ||
-            (strcmp (argv[argc - 1], p) /* match against gluster target */ &&
+            (strcmp (argv[argc - 1], path) /* match against gluster target */ &&
              strcmp (argv[argc - 1], buf) /* match against file target */) != 0) {
                 fprintf (stderr, "rsync target does not match "GEOREP" session\n");
                 goto error;

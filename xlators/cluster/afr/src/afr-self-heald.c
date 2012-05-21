@@ -1,20 +1,11 @@
 /*
-   Copyright (c) 2010-2011 Gluster, Inc. <http://www.gluster.com>
-   This file is part of GlusterFS.
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
+  This file is part of GlusterFS.
 
-   GlusterFS is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published
-   by the Free Software Foundation; either version 3 of the License,
-   or (at your option) any later version.
-
-   GlusterFS is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-   General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program.  If not, see
-   <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef _CONFIG_H
@@ -28,8 +19,6 @@
 #include "protocol-common.h"
 #include "event-history.h"
 
-#define AFR_POLL_TIMEOUT 600
-
 typedef enum {
         STOP_CRAWL_ON_SINGLE_SUBVOL = 1
 } afr_crawl_flags_t;
@@ -41,7 +30,6 @@ typedef enum {
 
 typedef struct shd_dump {
         dict_t   *dict;
-        time_t   sh_time;
         xlator_t *this;
         int      child;
 } shd_dump_t;
@@ -136,8 +124,8 @@ _build_index_loc (xlator_t *this, loc_t *loc, char *name, loc_t *parent)
 }
 
 int
-_add_str_to_dict (xlator_t *this, dict_t *output, int child, char *str,
-                  gf_boolean_t dyn)
+_add_path_to_dict (xlator_t *this, dict_t *output, int child, char *path,
+                   struct timeval *tv, gf_boolean_t dyn)
 {
         //subkey not used for now
         int             ret = -1;
@@ -156,15 +144,27 @@ _add_str_to_dict (xlator_t *this, dict_t *output, int child, char *str,
 
         snprintf (key, sizeof (key), "%d-%d-%"PRIu64, xl_id, child, count);
         if (dyn)
-                ret = dict_set_dynstr (output, key, str);
+                ret = dict_set_dynstr (output, key, path);
         else
-                ret = dict_set_str (output, key, str);
+                ret = dict_set_str (output, key, path);
         if (ret) {
                 gf_log (this->name, GF_LOG_ERROR, "%s: Could not add to output",
-                        str);
+                        path);
                 goto out;
         }
 
+        if (!tv)
+                goto inc_count;
+        snprintf (key, sizeof (key), "%d-%d-%"PRIu64"-time", xl_id,
+                  child, count);
+        ret = dict_set_uint32 (output, key, tv->tv_sec);
+        if (ret) {
+                gf_log (this->name, GF_LOG_ERROR, "%s: Could not set time",
+                        path);
+                goto out;
+        }
+
+inc_count:
         snprintf (key, sizeof (key), "%d-%d-count", xl_id, child);
         ret = dict_set_uint64 (output, key, count + 1);
         if (ret) {
@@ -219,23 +219,20 @@ _add_event_to_dict (circular_buffer_t *cb, void *data)
         shd_event = cb->data;
         if (shd_event->child != dump_data->child)
                 goto out;
-        if (cb->tv.tv_sec >= dump_data->sh_time)
-                ret = _add_str_to_dict (dump_data->this, dump_data->dict,
-                                        dump_data->child, shd_event->path,
-                                        _gf_false);
+        ret = _add_path_to_dict (dump_data->this, dump_data->dict,
+                                 dump_data->child, shd_event->path, &cb->tv,
+                                 _gf_false);
 out:
         return ret;
 }
 
 int
-_add_eh_to_dict (xlator_t *this, eh_t *eh, dict_t *dict, time_t sh_time,
-                 int child)
+_add_eh_to_dict (xlator_t *this, eh_t *eh, dict_t *dict, int child)
 {
         shd_dump_t dump_data = {0};
 
         dump_data.this = this;
         dump_data.dict = dict;
-        dump_data.sh_time = sh_time;
         dump_data.child = child;
         eh_dump (eh, &dump_data, _add_event_to_dict);
         return 0;
@@ -261,8 +258,8 @@ _add_summary_to_dict (xlator_t *this, afr_crawl_data_t *crawl_data,
         if (ret)
                 goto out;
 
-        ret = _add_str_to_dict (this, output, crawl_data->child, path,
-                                _gf_true);
+        ret = _add_path_to_dict (this, output, crawl_data->child, path, NULL,
+                                 _gf_true);
 out:
         if (ret && path)
                 GF_FREE (path);
@@ -385,13 +382,6 @@ afr_crawl_done  (int ret, call_frame_t *sync_frame, void *data)
 void
 _do_self_heal_on_subvol (xlator_t *this, int child, afr_crawl_type_t crawl)
 {
-        afr_private_t   *priv = NULL;
-        afr_self_heald_t *shd = NULL;
-
-        priv = this->private;
-        shd = &priv->shd;
-
-        time (&shd->sh_times[child]);
         afr_start_crawl (this, child, crawl, _self_heal_entry,
                          NULL, _gf_true, STOP_CRAWL_ON_SINGLE_SUBVOL,
                          afr_crawl_done);
@@ -525,7 +515,7 @@ _add_all_subvols_eh_to_dict (xlator_t *this, eh_t *eh, dict_t *dict)
         for (i = 0; i < priv->child_count; i++) {
                 if (shd->pos[i] != AFR_POS_LOCAL)
                         continue;
-                _add_eh_to_dict (this, eh, dict, shd->sh_times[i], i);
+                _add_eh_to_dict (this, eh, dict, i);
         }
         return 0;
 }
@@ -610,7 +600,7 @@ afr_poll_self_heal (void *data)
         }
         if (shd->enabled && (shd->pos[child] == AFR_POS_LOCAL))
                 _do_self_heal_on_subvol (this, child, INDEX);
-        timeout.tv_sec = AFR_POLL_TIMEOUT;
+        timeout.tv_sec = shd->timeout;
         timeout.tv_usec = 0;
         //notify and previous timer should be synchronized.
         LOCK (&priv->lock);

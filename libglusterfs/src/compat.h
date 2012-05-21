@@ -1,20 +1,11 @@
 /*
-   Copyright (c) 2006-2011 Gluster, Inc. <http://www.gluster.com>
-   This file is part of GlusterFS.
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
+  This file is part of GlusterFS.
 
-   GlusterFS is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published
-   by the Free Software Foundation; either version 3 of the License,
-   or (at your option) any later version.
-
-   GlusterFS is distributed in the hope that it will be useful, but
-   WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-   General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program.  If not, see
-   <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef __COMPAT_H__
@@ -116,13 +107,6 @@ enum {
 #define F_SETLK64       F_SETLK
 #define F_SETLKW64      F_SETLKW
 
-#ifdef __NetBSD__
-char *basename_r(const char *);
-char *dirname_r(char *);
-
-#define basename(path) basename_r(path)
-#define dirname(path) dirname_r(path)
-#endif /* __NetBSD__ */
 #endif /* GF_BSD_HOST_OS */
 
 #ifdef GF_DARWIN_HOST_OS
@@ -350,6 +334,15 @@ dirent_size (struct dirent *entry)
         return size;
 }
 
+#ifdef THREAD_UNSAFE_BASENAME
+char *basename_r(const char *);
+#define basename(path) basename_r(path)
+#endif /* THREAD_UNSAFE_BASENAME */
+
+#ifdef THREAD_UNSAFE_DIRNAME
+char *dirname_r(const char *path);
+#define dirname(path) dirname_r(path)
+#endif /* THREAD_UNSAFE_DIRNAME */
 
 #ifdef HAVE_STRUCT_STAT_ST_ATIM_TV_NSEC
 /* Linux, Solaris, Cygwin */

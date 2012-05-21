@@ -125,6 +125,7 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"cluster.data-self-heal",               "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
         {"cluster.entry-self-heal",              "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
         {"cluster.self-heal-daemon",             "cluster/replicate",  "!self-heal-daemon" , NULL, NO_DOC, 0     },
+        {"cluster.heal-timeout",                 "cluster/replicate",  "!heal-timeout" , NULL, NO_DOC, 0     },
         {"cluster.strict-readdir",               "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
         {"cluster.self-heal-window-size",        "cluster/replicate",         "data-self-heal-window-size", NULL, DOC, 0},
         {"cluster.data-change-log",              "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
@@ -222,9 +223,9 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {VKEY_FEATURES_LIMIT_USAGE,              "features/quota",            "limit-set", NULL, NO_DOC, 0},
         {"features.quota-timeout",               "features/quota",            "timeout", "0", DOC, 0},
         {"server.statedump-path",                "protocol/server",           "statedump-path", NULL, DOC, 0},
-        {"features.lock-heal",                   "protocol/client",           "lk-heal", NULL, DOC, 0},
+        {"features.lock-heal",                   "protocol/client",           "lk-heal", NULL, NO_DOC, 0},
         {"features.lock-heal",                   "protocol/server",           "lk-heal", NULL, DOC, 0},
-        {"features.grace-timeout",               "protocol/client",           "grace-timeout", NULL, DOC, 0},
+        {"features.grace-timeout",               "protocol/client",           "grace-timeout", NULL, NO_DOC, 0},
         {"features.grace-timeout",               "protocol/server",           "grace-timeout", NULL, DOC, 0},
         {"feature.read-only",                    "features/read-only",        "!read-only", "off", DOC, 0},
         {NULL,                                                                }
@@ -1696,36 +1697,34 @@ server_graph_builder (volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
                         return -1;
         }
 
-        if (glusterd_is_volume_replicate (volinfo)) {
-                xl = volgen_graph_add (graph, "features/index", volname);
-                if (!xl)
-                        return -1;
+        xl = volgen_graph_add (graph, "features/index", volname);
+        if (!xl)
+                return -1;
 
-                snprintf (index_basepath, sizeof (index_basepath), "%s/%s",
-                          path, ".glusterfs/indices");
-                ret = xlator_set_option (xl, "index-base", index_basepath);
-                if (ret)
-                        return -1;
+        snprintf (index_basepath, sizeof (index_basepath), "%s/%s",
+                  path, ".glusterfs/indices");
+        ret = xlator_set_option (xl, "index-base", index_basepath);
+        if (ret)
+                return -1;
 
+        ret = glusterd_volinfo_get_boolean (volinfo, "cluster.hsrepl");
+        if (ret > 0) {
+                xl = volgen_graph_add (graph, "features/helper",
+                                       volname);
+                if (!xl) {
+                        return -1;
+                }
                 ret = check_and_add_debug_xl (graph, set_dict, volname,
-                                              "index");
-                if (ret)
+                                              "helper");
+                if (ret) {
                         return -1;
-
-                ret = glusterd_volinfo_get_boolean (volinfo, "cluster.hsrepl");
-                if (ret > 0) {
-                        xl = volgen_graph_add (graph, "features/helper",
-                                               volname);
-                        if (!xl) {
-                                return -1;
-                        }
-                        ret = check_and_add_debug_xl (graph, set_dict, volname,
-                                                      "helper");
-                        if (ret) {
-                                return -1;
-                        }
                 }
         }
+
+        ret = check_and_add_debug_xl (graph, set_dict, volname,
+                                      "index");
+        if (ret)
+                return -1;
 
         xl = volgen_graph_add (graph, "features/marker", volname);
         if (!xl)
@@ -2582,20 +2581,35 @@ build_client_graph (volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
                                     &client_graph_builder);
 }
 
+char *gd_shd_options[] = {
+        "!self-heal-daemon",
+        "!heal-timeout",
+        NULL
+};
+
+char*
+gd_get_matching_option (char **options, char *option)
+{
+        while (*options && strcmp (*options, option))
+                options++;
+        return *options;
+}
+
 static int
 shd_option_handler (volgen_graph_t *graph, struct volopt_map_entry *vme,
                     void *param)
 {
         int                     ret = 0;
         struct volopt_map_entry new_vme = {0};
-        int                     shd = 0;
+        char                    *shd_option = NULL;
 
-        shd = !strcmp (vme->option, "!self-heal-daemon");
-        if ((vme->option[0] == '!') && !shd)
+        if (vme->option[0] != '!')
+                goto out;
+        shd_option = gd_get_matching_option (gd_shd_options, vme->option);
+        if (!shd_option)
                 goto out;
         new_vme = *vme;
-        if (shd)
-                new_vme.option = "self-heal-daemon";
+        new_vme.option = shd_option + 1;//option with out '!'
 
         ret = no_filter_option_handler (graph, &new_vme, param);
 out:
@@ -3392,6 +3406,58 @@ out:
 }
 
 int
+glusterd_check_nfs_volfile_identical (gf_boolean_t *identical)
+{
+        char            nfsvol[PATH_MAX]        = {0,};
+        char            tmpnfsvol[PATH_MAX]     = {0,};
+        glusterd_conf_t *conf                   = NULL;
+        xlator_t        *this                   = NULL;
+        int             ret                     = -1;
+        int             need_unlink             = 0;
+        int             tmp_fd                  = -1;
+
+        this = THIS;
+
+        GF_ASSERT (this);
+        GF_ASSERT (identical);
+
+        conf = this->private;
+
+        glusterd_get_nodesvc_volfile ("nfs", conf->workdir,
+                                      nfsvol, sizeof (nfsvol));
+
+        snprintf (tmpnfsvol, sizeof (tmpnfsvol), "/tmp/gnfs-XXXXXX");
+
+        tmp_fd = mkstemp (tmpnfsvol);
+        if (tmp_fd < 0) {
+                gf_log ("", GF_LOG_WARNING, "Unable to create temp file %s: "
+                                "(%s)", tmpnfsvol, strerror (errno));
+                goto out;
+        }
+
+        need_unlink = 1;
+
+        ret = glusterd_create_global_volfile (build_nfs_graph,
+                                              tmpnfsvol, NULL);
+        if (ret)
+                goto out;
+
+        ret = glusterd_check_files_identical (nfsvol, tmpnfsvol,
+                                              identical);
+        if (ret)
+                goto out;
+
+out:
+        if (need_unlink)
+                unlink (tmpnfsvol);
+
+        if (tmp_fd >= 0)
+                close (tmp_fd);
+
+        return ret;
+}
+
+int
 glusterd_delete_volfile (glusterd_volinfo_t *volinfo,
                          glusterd_brickinfo_t *brickinfo)
 {
@@ -3406,6 +3472,26 @@ glusterd_delete_volfile (glusterd_volinfo_t *volinfo,
         if (ret)
                 gf_log ("glusterd", GF_LOG_ERROR, "failed to delete file: %s, "
                         "reason: %s", filename, strerror (errno));
+        return ret;
+}
+
+int
+validate_shdopts (glusterd_volinfo_t *volinfo,
+                  dict_t *val_dict,
+                  char **op_errstr)
+{
+        volgen_graph_t graph = {0,};
+        int     ret = -1;
+
+        graph.errstr = op_errstr;
+
+        ret = build_shd_graph (&graph, val_dict);
+        if (!ret)
+                ret = graph_reconf_validateopt (&graph.graph, op_errstr);
+
+        volgen_graph_free (&graph);
+
+        gf_log ("glusterd", GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
 }
 
@@ -3613,6 +3699,16 @@ glusterd_validate_globalopts (glusterd_volinfo_t *volinfo,
         }
 
         ret = validate_nfsopts (volinfo, val_dict, op_errstr);
+        if (ret) {
+                gf_log ("", GF_LOG_DEBUG, "Could not Validate nfs");
+                goto out;
+        }
+
+        ret = validate_shdopts (volinfo, val_dict, op_errstr);
+        if (ret) {
+                gf_log ("", GF_LOG_DEBUG, "Could not Validate self-heald");
+                goto out;
+        }
 
 out:
         gf_log ("", GF_LOG_DEBUG, "Returning %d", ret);
@@ -3662,6 +3758,17 @@ glusterd_validate_reconfopts (glusterd_volinfo_t *volinfo, dict_t *val_dict,
         }
 
         ret = validate_nfsopts (volinfo, val_dict, op_errstr);
+        if (ret) {
+                gf_log ("", GF_LOG_DEBUG, "Could not Validate nfs");
+                goto out;
+        }
+
+
+        ret = validate_shdopts (volinfo, val_dict, op_errstr);
+        if (ret) {
+                gf_log ("", GF_LOG_DEBUG, "Could not Validate self-heald");
+                goto out;
+        }
 
 
 out:

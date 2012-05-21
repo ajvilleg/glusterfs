@@ -188,12 +188,10 @@ gf_del_locker (server_connection_t *conn, const char *volume,
         struct _locker    *tmp = NULL;
         int32_t            ret = -1;
         struct list_head  *head = NULL;
-        struct list_head   del;
         struct _lock_table *table = NULL;
+        int                found = 0;
 
         GF_VALIDATE_OR_GOTO ("server", volume, out);
-
-        INIT_LIST_HEAD (&del);
 
         pthread_mutex_lock (&conn->lock);
         {
@@ -210,19 +208,21 @@ gf_del_locker (server_connection_t *conn, const char *volume,
                                 continue;
 
                         if (locker->fd && fd && (locker->fd == fd))
-                                list_move_tail (&locker->lockers, &del);
+                                found = 1;
                         else if (locker->loc.inode && loc &&
                                  (locker->loc.inode == loc->inode))
-                                list_move_tail (&locker->lockers, &del);
+                                found = 1;
+                        if (found) {
+                                list_del_init (&locker->lockers);
+                                break;
+                        }
                 }
+                if (!found)
+                        locker = NULL;
         }
         pthread_mutex_unlock (&conn->lock);
 
-        tmp = NULL;
-        locker = NULL;
-
-        list_for_each_entry_safe (locker, tmp, &del, lockers) {
-                list_del_init (&locker->lockers);
+        if (locker) {
                 if (locker->fd)
                         fd_unref (locker->fd);
                 else
@@ -687,7 +687,7 @@ server_connection_get (xlator_t *this, const char *id)
         pthread_mutex_lock (&conf->mutex);
         {
                 list_for_each_entry (trav, &conf->conns, list) {
-                        if (!strncmp (trav->id, id, strlen (id))) {
+                        if (!strcmp (trav->id, id)) {
                                 conn = trav;
                                 conn->bind_ref++;
                                 goto unlock;

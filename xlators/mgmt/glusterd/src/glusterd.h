@@ -219,6 +219,7 @@ struct glusterd_volinfo_ {
         int                     port;
         glusterd_store_handle_t *shandle;
         glusterd_store_handle_t *rb_shandle;
+        glusterd_store_handle_t *node_state_shandle;
 
         /* Defrag/rebalance related */
         gf_defrag_status_t      defrag_status;
@@ -288,6 +289,7 @@ enum glusterd_vol_comp_status_ {
 #define GLUSTERD_VOLUME_RBSTATE_FILE "rbstate"
 #define GLUSTERD_BRICK_INFO_DIR "bricks"
 #define GLUSTERD_CKSUM_FILE "cksum"
+#define GLUSTERD_NODE_STATE_FILE "node_state.info"
 
 /* definitions related to replace brick */
 #define RB_CLIENT_MOUNTPOINT    "rb_mount"
@@ -432,7 +434,8 @@ glusterd_handle_defrag_volume_v2 (rpcsvc_request_t *req);
 
 int
 glusterd_xfer_cli_probe_resp (rpcsvc_request_t *req, int32_t op_ret,
-                              int32_t op_errno, char *hostname, int port);
+                              int32_t op_errno, char *op_errstr, char *hostname,
+                              int port);
 
 int
 glusterd_op_commit_send_resp (rpcsvc_request_t *req,
@@ -529,7 +532,8 @@ glusterd_handle_fsm_log (rpcsvc_request_t *req);
 
 int
 glusterd_xfer_cli_deprobe_resp (rpcsvc_request_t *req, int32_t op_ret,
-                                int32_t op_errno, char *hostname);
+                                int32_t op_errno, char *op_errstr,
+                                char *hostname);
 
 int
 glusterd_fetchspec_notify (xlator_t *this);

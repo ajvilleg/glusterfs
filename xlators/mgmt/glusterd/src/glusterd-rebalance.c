@@ -190,8 +190,7 @@ glusterd_defrag_notify (struct rpc_clnt *rpc, void *mydata,
                         }
                  }
 
-                glusterd_store_volinfo (volinfo,
-                                        GLUSTERD_VOLINFO_VER_AC_INCREMENT);
+                glusterd_store_perform_node_state_store (volinfo);
 
                 if (defrag->rpc) {
                         rpc_clnt_unref (defrag->rpc);
@@ -225,7 +224,6 @@ glusterd_handle_defrag_start (glusterd_volinfo_t *volinfo, char *op_errstr,
         runner_t               runner = {0,};
         glusterd_conf_t        *priv = NULL;
         char                   defrag_path[PATH_MAX];
-        struct stat            buf = {0,};
         char                   sockfile[PATH_MAX] = {0,};
         char                   pidfile[PATH_MAX] = {0,};
         char                   logfile[PATH_MAX] = {0,};
@@ -261,21 +259,14 @@ glusterd_handle_defrag_start (glusterd_volinfo_t *volinfo, char *op_errstr,
         volinfo->rebalance_failures = 0;
 
         volinfo->defrag_cmd = cmd;
-        glusterd_store_volinfo (volinfo, GLUSTERD_VOLINFO_VER_AC_INCREMENT);
+        glusterd_store_perform_node_state_store (volinfo);
 
         GLUSTERD_GET_DEFRAG_DIR (defrag_path, volinfo, priv);
-        ret = stat (defrag_path, &buf);
-        if (ret && (errno == ENOENT)) {
-                runinit (&runner);
-                runner_add_args (&runner, "mkdir", "-p", defrag_path, NULL);
-                ret = runner_run_reuse (&runner);
-                if (ret) {
-                        runner_log (&runner, "glusterd", GF_LOG_DEBUG,
-                                    "command failed");
-                        runner_end (&runner);
-                        goto out;
-                }
-                runner_end (&runner);
+        ret = mkdir_p (defrag_path, 0777, 0, NULL);
+        if (ret) {
+                gf_log (THIS->name, GF_LOG_ERROR, "Failed to create "
+                        "directory %s", defrag_path);
+                goto out;
         }
 
         GLUSTERD_GET_DEFRAG_SOCK_FILE (sockfile, volinfo, priv);

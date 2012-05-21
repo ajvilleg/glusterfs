@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2008-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 
@@ -100,12 +91,12 @@ typedef struct afr_self_heald_ {
         afr_crawl_type_t *pending;
         gf_boolean_t     *inprogress;
         afr_child_pos_t  *pos;
-        time_t           *sh_times;
         gf_timer_t       **timer;
         eh_t             *healed;
         eh_t             *heal_failed;
         eh_t             *split_brain;
         char             *node_uuid;
+        int              timeout;
 } afr_self_heald_t;
 
 typedef struct _afr_private {
@@ -244,6 +235,7 @@ typedef struct {
 
         int   op_failed;
 
+        gf_boolean_t sync_done;
         gf_boolean_t data_lock_held;
         gf_boolean_t eof_reached;
         fd_t  *healing_fd;
@@ -679,12 +671,7 @@ typedef struct _afr_local {
 
                 afr_transaction_type type;
 
-                int success_count;
-                int erase_pending;
-                int failure_count;
-
-                int last_tried;
-                int32_t *child_errno;
+                int32_t         **txn_changelog;//changelog after pre+post ops
                 unsigned char   *pre_op;
 
                 call_frame_t *main_frame;

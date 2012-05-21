@@ -27,6 +27,12 @@
 
 #include <rpc/rpc.h>
 
+#if defined(__NetBSD__)
+#define xdr_u_quad_t xdr_u_int64_t
+#define xdr_quad_t   xdr_int64_t
+#define xdr_uint32_t xdr_u_int32_t
+#define xdr_uint64_t xdr_u_int64_t
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -35,6 +41,13 @@ extern "C" {
 #define MAXNETOBJ_SZ 1024
 #define LM_MAXSTRLEN 1024
 #define MAXNAMELEN 1025
+
+#if defined(__NetBSD__)
+#define xdr_u_quad_t xdr_u_int64_t
+#define xdr_quad_t   xdr_int64_t
+#define xdr_uint32_t xdr_u_int32_t
+#define xdr_uint64_t xdr_u_int64_t
+#endif
 
 /*
  * The following enums are actually bit encoded for efficient
@@ -170,6 +183,13 @@ struct nlm4_shareres {
 };
 typedef struct nlm4_shareres nlm4_shareres;
 
+struct nlm4_freeallargs {
+        char *name;
+        u_int32_t state;
+};
+typedef struct nlm4_freeallargs nlm4_freeallargs;
+
+
 #define NLM4_NULL          0
 #define NLM4_TEST          1
 #define NLM4_LOCK          2
@@ -216,6 +236,7 @@ extern  bool_t xdr_nlm4_cancargs (XDR *, nlm4_cancargs*);
 extern  bool_t xdr_nlm4_unlockargs (XDR *, nlm4_unlockargs*);
 extern  bool_t xdr_nlm4_shareargs (XDR *, nlm4_shareargs*);
 extern  bool_t xdr_nlm4_shareres (XDR *, nlm4_shareres*);
+extern  bool_t xdr_nlm4_freeallargs (XDR *, nlm4_freeallargs*);
 
 #else /* K&R C */
 extern bool_t xdr_netobj ();
@@ -235,6 +256,7 @@ extern bool_t xdr_nlm4_cancargs ();
 extern bool_t xdr_nlm4_unlockargs ();
 extern bool_t xdr_nlm4_shareargs ();
 extern bool_t xdr_nlm4_shareres ();
+extern bool_t xdr_nlm4_freeallargs ();
 
 #endif /* K&R C */
 

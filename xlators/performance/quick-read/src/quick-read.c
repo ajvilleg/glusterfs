@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2009-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #include "quick-read.h"
@@ -429,13 +420,32 @@ qr_lookup_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                         }
                 }
 
+		/*
+		 * Create our own internal dict and migrate the file content
+		 * over to it so it isn't floating around in other translator
+		 * caches.
+		 */
                 if (qr_inode->xattr) {
                         dict_unref (qr_inode->xattr);
                         qr_inode->xattr = NULL;
                         table->cache_used -= qr_inode->stbuf.ia_size;
                 }
 
-                qr_inode->xattr = dict_ref (xdata);
+		qr_inode->xattr = dict_new();
+		if (!qr_inode->xattr) {
+			op_ret = -1;
+			op_errno = ENOMEM;
+			goto unlock;
+		}
+
+		if (dict_set(qr_inode->xattr, GF_CONTENT_KEY, content) < 0) {
+			op_ret = -1;
+			op_errno = ENOMEM;
+			goto unlock;
+		}
+
+		dict_del(xdata, GF_CONTENT_KEY);
+
                 qr_inode->stbuf = *buf;
                 table->cache_used += buf->ia_size;
 
@@ -3041,7 +3051,7 @@ qr_lk_helper (call_frame_t *frame, xlator_t *this, fd_t *fd, int32_t cmd,
         return 0;
 
 unwind:
-        QR_STACK_UNWIND (lk, frame, -1, op_errno, NULL, NULL);
+        QR_STACK_UNWIND (lk, frame, -1, op_errno, lock, xdata);
         return 0;
 }
 

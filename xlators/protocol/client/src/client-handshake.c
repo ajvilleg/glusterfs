@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2010-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #ifndef _CONFIG_H
@@ -254,35 +245,40 @@ client_ping_cbk (struct rpc_req *req, struct iovec *iov, int count,
         clnt_conf_t           *conf    = NULL;
 
         if (!myframe) {
-                gf_log (THIS->name, GF_LOG_WARNING, "frame with the request is NULL");
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "frame with the request is NULL");
                 goto out;
         }
         frame = myframe;
         this = frame->this;
         if (!this || !this->private) {
-                gf_log (THIS->name, GF_LOG_WARNING, "xlator private is not set");
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "xlator private is not set");
                 goto out;
         }
 
         conf = this->private;
         conn = &conf->rpc->conn;
 
-        if (req->rpc_status == -1) {
-                if (conn->ping_timer != NULL) {
-                        gf_log (this->name, GF_LOG_WARNING, "socket or ib"
-                                " related error");
-                        gf_timer_call_cancel (this->ctx, conn->ping_timer);
-                        conn->ping_timer = NULL;
-                } else {
-                        /* timer expired and transport bailed out */
-                        gf_log (this->name, GF_LOG_WARNING, "timer must have "
-                                "expired");
-                }
-                goto out;
-        }
-
         pthread_mutex_lock (&conn->lock);
         {
+                if (req->rpc_status == -1) {
+                        if (conn->ping_timer != NULL) {
+                                gf_log (this->name, GF_LOG_WARNING,
+                                        "socket or ib related error");
+                                gf_timer_call_cancel (this->ctx,
+                                                      conn->ping_timer);
+                                conn->ping_timer = NULL;
+                        } else {
+                                /* timer expired and transport bailed out */
+                                gf_log (this->name, GF_LOG_WARNING,
+                                        "timer must have expired");
+                        }
+
+                        goto unlock;
+                }
+
+
                 timeout.tv_sec  = conf->opt.ping_timeout;
                 timeout.tv_usec = 0;
 
@@ -297,6 +293,7 @@ client_ping_cbk (struct rpc_req *req, struct iovec *iov, int count,
                         gf_log (this->name, GF_LOG_WARNING,
                                 "failed to set the ping timer");
         }
+unlock:
         pthread_mutex_unlock (&conn->lock);
 out:
         if (frame)
@@ -457,13 +454,13 @@ client_set_lk_version_cbk (struct rpc_req *req, struct iovec *iov,
 
         ret = 0;
 out:
-        //TODO: Check for all released fdctx and destroy them
         if (fr)
                 STACK_DESTROY (fr->root);
 
         return ret;
 }
 
+//TODO: Check for all released fdctx and destroy them
 int
 client_set_lk_version (xlator_t *this)
 {
@@ -472,16 +469,24 @@ client_set_lk_version (xlator_t *this)
         call_frame_t       *frame    = NULL;
         gf_set_lk_ver_req   req      = {0, };
 
+        GF_VALIDATE_OR_GOTO ("client", this, err);
+
         conf = (clnt_conf_t *) this->private;
 
         req.lk_ver = client_get_lk_ver (conf);
-        req.uid    = this->ctx->process_uuid;
-
-        gf_log (this->name, GF_LOG_DEBUG, "Sending SET_LK_VERSION");
+        ret = gf_asprintf (&req.uid, "%s-%s-%d",
+                           this->ctx->process_uuid, this->name,
+                           this->graph->id);
+        if (ret == -1)
+                goto err;
 
         frame = create_frame (this, this->ctx->pool);
-        if (!frame)
+        if (!frame) {
+                ret = -1;
                 goto out;
+        }
+
+        gf_log (this->name, GF_LOG_DEBUG, "Sending SET_LK_VERSION");
 
         ret = client_submit_request (this, &req, frame,
                                      conf->handshake,
@@ -490,11 +495,11 @@ client_set_lk_version (xlator_t *this)
                                      NULL, NULL, 0, NULL, 0, NULL,
                                      (xdrproc_t)xdr_gf_set_lk_ver_req);
 out:
-        if (ret < 0) {
-                //TODO: Check for all released fdctx and destroy them
-                gf_log (this->name, GF_LOG_WARNING,
-                        "Failed to send SET_LK_VERSION to server");
-        }
+        GF_FREE (req.uid);
+        return ret;
+err:
+        gf_log (this->name, GF_LOG_WARNING,
+                "Failed to send SET_LK_VERSION to server");
 
         return ret;
 }

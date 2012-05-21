@@ -1,20 +1,11 @@
 /*
-  Copyright (c) 2007-2011 Gluster, Inc. <http://www.gluster.com>
+  Copyright (c) 2008-2012 Red Hat, Inc. <http://www.redhat.com>
   This file is part of GlusterFS.
 
-  GlusterFS is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published
-  by the Free Software Foundation; either version 3 of the License,
-  or (at your option) any later version.
-
-  GlusterFS is distributed in the hope that it will be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program.  If not, see
-  <http://www.gnu.org/licenses/>.
+  This file is licensed to you under your choice of the GNU Lesser
+  General Public License, version 3 or any later version (LGPLv3 or
+  later), or the GNU General Public License, version 2 (GPLv2), in all
+  cases as published by the Free Software Foundation.
 */
 
 #include "dict.h"
@@ -296,11 +287,10 @@ afr_trace_inodelk_out (call_frame_t *frame, xlator_t *this,
         afr_print_verdict (op_ret, op_errno, verdict);
 
         gf_log (this->name, GF_LOG_INFO,
-                "[%s %s] [%s] Lockee={%s} Number={%llu}",
+                "[%s %s] [%s] lk-owner=%s Lockee={%s} Number={%llu}",
                 lock_call_type_str,
                 lk_op_type == AFR_LOCK_OP ? "LOCK REPLY" : "UNLOCK REPLY",
-                verdict,
-                lockee,
+                verdict, lkowner_utoa (&frame->root->lk_owner), lockee,
                 (unsigned long long) int_lock->lock_number);
 
 }
@@ -652,6 +642,10 @@ afr_unlock_inodelk (call_frame_t *frame, xlator_t *this)
                         }
                         UNLOCK (&local->fd->lock);
 
+                        if (!fd_lock_owner) {
+                                afr_set_lk_owner (frame, this, local->fd);
+                                fd_lock_owner = _gf_true;
+                        }
                         if (piggyback) {
                                 afr_unlock_inodelk_cbk (frame, (void *) (long) i,
                                                         this, 1, 0, NULL);
@@ -660,10 +654,6 @@ afr_unlock_inodelk (call_frame_t *frame, xlator_t *this)
                                 continue;
                         }
 
-                        if (!fd_lock_owner) {
-                                afr_set_lk_owner (frame, this, local->fd);
-                                fd_lock_owner = _gf_true;
-                        }
                         flock_use = &full_flock;
                 wind:
                         AFR_TRACE_INODELK_IN (frame, this,
@@ -1508,6 +1498,11 @@ afr_nonblocking_inodelk (call_frame_t *frame, xlator_t *this)
                         }
                         UNLOCK (&local->fd->lock);
 
+                        if (!fd_lock_owner) {
+                                afr_set_lk_owner (frame, this, local->fd);
+                                fd_lock_owner = _gf_true;
+                        }
+
                         if (piggyback) {
                                 /* (op_ret == 1) => indicate piggybacked lock */
                                 afr_nonblocking_inodelk_cbk (frame, (void *) (long) i,
@@ -1517,10 +1512,6 @@ afr_nonblocking_inodelk (call_frame_t *frame, xlator_t *this)
                                 continue;
                         }
                         flock_use = &full_flock;
-                        if (!fd_lock_owner) {
-                                afr_set_lk_owner (frame, this, local->fd);
-                                fd_lock_owner = _gf_true;
-                        }
                 wind:
                         AFR_TRACE_INODELK_IN (frame, this,
                                               AFR_INODELK_NB_TRANSACTION,
@@ -1766,6 +1757,7 @@ afr_unlock (call_frame_t *frame, xlator_t *this)
         local = frame->local;
 
         if (transaction_lk_op (local)) {
+                afr_set_lk_owner (frame, this, frame->root);
                 if (is_afr_lock_transaction (local))
                         afr_unlock_inodelk (frame, this);
                 else
@@ -2294,6 +2286,8 @@ afr_lk_transfer_datalock (call_frame_t *dst, call_frame_t *src,
                         sizeof (*src_lock->inode_locked_nodes) * child_count);
         }
 
+        dst_lock->transaction_lk_type = src_lock->transaction_lk_type;
+        dst_lock->selfheal_lk_type    = src_lock->selfheal_lk_type;
         dst_lock->inodelk_lock_count = src_lock->inodelk_lock_count;
         src_lock->inodelk_lock_count = 0;
 }
