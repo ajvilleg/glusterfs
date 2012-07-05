@@ -47,6 +47,7 @@
 #include "cli1-xdr.h"
 #include "statedump.h"
 #include "syncop.h"
+#include "xlator.h"
 
 static char is_mgmt_rpc_reconnect;
 
@@ -1521,6 +1522,9 @@ glusterfs_volfile_reconfigure (FILE *newvolfile_fp)
 
         ret = 0;
 out:
+        if (oldvolfile_fp)
+                fclose (oldvolfile_fp);
+
         return ret;
 }
 
@@ -1598,6 +1602,8 @@ mgmt_getspec_cbk (struct rpc_req *req, struct iovec *iov, int count,
         }
 
         ret = glusterfs_process_volfp (ctx, tmpfp);
+        /* tmpfp closed */
+        tmpfp = NULL;
         if (ret)
                 goto out;
 
@@ -1623,6 +1629,10 @@ out:
                         ctx->cmd_args.volfile_id);
                 cleanup_and_exit (0);
         }
+
+        if (tmpfp)
+                fclose (tmpfp);
+
         return 0;
 }
 
@@ -1928,6 +1938,24 @@ glusterfs_listener_stop (glusterfs_ctx_t *ctx)
 }
 
 int
+glusterfs_mgmt_notify (int32_t op, void *data, ...)
+{
+        int ret = 0;
+        switch (op)
+        {
+                case GF_EN_DEFRAG_STATUS:
+                        ret = glusterfs_rebalance_event_notify ((dict_t*) data);
+                        break;
+
+                default:
+                        gf_log ("", GF_LOG_ERROR, "Invalid op");
+                        break;
+        }
+
+        return ret;
+}
+
+int
 glusterfs_mgmt_init (glusterfs_ctx_t *ctx)
 {
         cmd_args_t              *cmd_args = NULL;
@@ -1971,6 +1999,8 @@ glusterfs_mgmt_init (glusterfs_ctx_t *ctx)
                 gf_log (THIS->name, GF_LOG_WARNING, "failed to register callback function");
                 goto out;
         }
+
+        ctx->notify = glusterfs_mgmt_notify;
 
         /* This value should be set before doing the 'rpc_clnt_start()' as
            the notify function uses this variable */

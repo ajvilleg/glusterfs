@@ -152,6 +152,8 @@ static struct argp_option gf_options[] = {
          "Mount the filesystem in 'read-only' mode"},
         {"acl", ARGP_ACL_KEY, 0, 0,
          "Mount the filesystem with POSIX ACL support"},
+        {"selinux", ARGP_SELINUX_KEY, 0, 0,
+         "Enable SELinux label (extened attributes) support on inodes"},
         {"worm", ARGP_WORM_KEY, 0, 0,
          "Mount the filesystem in 'worm' mode"},
         {"mac-compat", ARGP_MAC_COMPAT_KEY, "BOOL", OPTION_ARG_OPTIONAL,
@@ -348,6 +350,15 @@ create_fuse_mount (glusterfs_ctx_t *ctx)
                 }
         }
 
+        if (cmd_args->selinux) {
+                ret = dict_set_static_ptr (master->options, "selinux", "on");
+                if (ret < 0) {
+                        gf_log ("glusterfsd", GF_LOG_ERROR,
+                                "failed to set dict value for key selinux");
+                        goto err;
+                }
+        }
+
         if (cmd_args->read_only) {
                 ret = dict_set_static_ptr (master->options, "read-only", "on");
                 if (ret < 0) {
@@ -386,7 +397,7 @@ create_fuse_mount (glusterfs_ctx_t *ctx)
         }
 
         if (!cmd_args->no_daemon_mode) {
-                 ret = dict_set_static_ptr (master->options, "sync-mtab",
+                 ret = dict_set_static_ptr (master->options, "sync-to-mount",
                                             "enable");
                 if (ret < 0) {
                         gf_log ("glusterfsd", GF_LOG_ERROR,
@@ -562,6 +573,14 @@ parse_opts (int key, char *arg, struct argp_state *state)
 
         case ARGP_ACL_KEY:
                 cmd_args->acl = 1;
+		gf_remember_xlator_option (&cmd_args->xlator_options,
+					   "*-md-cache.cache-posix-acl=true");
+                break;
+
+        case ARGP_SELINUX_KEY:
+                cmd_args->selinux = 1;
+		gf_remember_xlator_option (&cmd_args->xlator_options,
+					   "*-md-cache.cache-selinux=true");
                 break;
 
         case ARGP_WORM_KEY:
@@ -895,7 +914,6 @@ generate_uuid ()
         char           tmp_str[1024] = {0,};
         char           hostname[256] = {0,};
         struct timeval tv = {0,};
-        struct tm      now = {0, };
         char           now_str[32];
 
         if (gettimeofday (&tv, NULL) == -1) {
@@ -904,15 +922,14 @@ generate_uuid ()
                         strerror (errno));
         }
 
-        if (gethostname (hostname, 256) == -1) {
+        if (gethostname (hostname, sizeof hostname) == -1) {
                 gf_log ("glusterfsd", GF_LOG_ERROR,
                         "gethostname: failed %s",
                         strerror (errno));
         }
 
-        localtime_r (&tv.tv_sec, &now);
-        strftime (now_str, 32, "%Y/%m/%d-%H:%M:%S", &now);
-        snprintf (tmp_str, 1024, "%s-%d-%s:%" GF_PRI_SUSECONDS,
+        gf_time_fmt (now_str, sizeof now_str, tv.tv_sec, gf_timefmt_Ymd_T);
+        snprintf (tmp_str, sizeof tmp_str, "%s-%d-%s:%" GF_PRI_SUSECONDS,
                   hostname, getpid(), now_str, tv.tv_usec);
 
         return gf_strdup (tmp_str);
@@ -1010,6 +1027,7 @@ glusterfs_ctx_defaults_init (glusterfs_ctx_t *ctx)
         cmd_args_t    *cmd_args = NULL;
         struct rlimit  lim = {0, };
         call_pool_t   *pool = NULL;
+        int            ret = -1;
 
         xlator_mem_acct_init (THIS, gfd_mt_end);
 
@@ -1017,7 +1035,7 @@ glusterfs_ctx_defaults_init (glusterfs_ctx_t *ctx)
         if (!ctx->process_uuid) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs uuid generation failed");
-                return -1;
+                goto out;
         }
 
         ctx->page_size  = 128 * GF_UNIT_KB;
@@ -1026,14 +1044,14 @@ glusterfs_ctx_defaults_init (glusterfs_ctx_t *ctx)
         if (!ctx->iobuf_pool) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs iobuf pool creation failed");
-                return -1;
+                goto out;
         }
 
         ctx->event_pool = event_pool_new (DEFAULT_EVENT_POOL_SIZE);
         if (!ctx->event_pool) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs event pool creation failed");
-                return -1;
+                goto out;
         }
 
         pool = GF_CALLOC (1, sizeof (call_pool_t),
@@ -1041,7 +1059,7 @@ glusterfs_ctx_defaults_init (glusterfs_ctx_t *ctx)
         if (!pool) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs call pool creation failed");
-                return -1;
+                goto out;
         }
 
         /* frame_mem_pool size 112 * 4k */
@@ -1049,21 +1067,21 @@ glusterfs_ctx_defaults_init (glusterfs_ctx_t *ctx)
         if (!pool->frame_mem_pool) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs frame pool creation failed");
-                return -1;
+                goto out;
         }
         /* stack_mem_pool size 256 * 1024 */
         pool->stack_mem_pool = mem_pool_new (call_stack_t, 1024);
         if (!pool->stack_mem_pool) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs stack pool creation failed");
-                return -1;
+                goto out;
         }
 
         ctx->stub_mem_pool = mem_pool_new (call_stub_t, 1024);
         if (!ctx->stub_mem_pool) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs stub pool creation failed");
-                return -1;
+                goto out;
         }
 
         ctx->dict_pool = mem_pool_new (dict_t, GF_MEMPOOL_COUNT_OF_DICT_T);
@@ -1108,7 +1126,35 @@ glusterfs_ctx_defaults_init (glusterfs_ctx_t *ctx)
         lim.rlim_max = RLIM_INFINITY;
         setrlimit (RLIMIT_CORE, &lim);
 
-        return 0;
+        ret = 0;
+out:
+
+        if (ret && pool) {
+
+                if (pool->frame_mem_pool)
+                        mem_pool_destroy (pool->frame_mem_pool);
+
+                if (pool->stack_mem_pool)
+                        mem_pool_destroy (pool->stack_mem_pool);
+
+                GF_FREE (pool);
+        }
+
+        if (ret && ctx) {
+                if (ctx->stub_mem_pool)
+                        mem_pool_destroy (ctx->stub_mem_pool);
+
+                if (ctx->dict_pool)
+                        mem_pool_destroy (ctx->dict_pool);
+
+                if (ctx->dict_data_pool)
+                        mem_pool_destroy (ctx->dict_data_pool);
+
+                if (ctx->dict_pair_pool)
+                        mem_pool_destroy (ctx->dict_pair_pool);
+        }
+
+        return ret;
 }
 
 static int
@@ -1153,16 +1199,14 @@ gf_check_and_set_mem_acct (int argc, char *argv[], glusterfs_ctx_t *ctx)
 int
 parse_cmdline (int argc, char *argv[], glusterfs_ctx_t *ctx)
 {
-        int               process_mode = 0;
-        int               ret = 0;
-        struct stat       stbuf = {0, };
-        struct tm        *tm = NULL;
-        time_t            utime;
-        char              timestr[256];
-        char              tmp_logfile[1024] = { 0 };
-        char              *tmp_logfile_dyn = NULL;
-        char              *tmp_logfilebase = NULL;
-        cmd_args_t        *cmd_args = NULL;
+        int          process_mode = 0;
+        int          ret = 0;
+        struct stat  stbuf = {0, };
+        char         timestr[32];
+        char         tmp_logfile[1024] = { 0 };
+        char        *tmp_logfile_dyn = NULL;
+        char        *tmp_logfilebase = NULL;
+        cmd_args_t  *cmd_args = NULL;
 
         cmd_args = &ctx->cmd_args;
 
@@ -1219,8 +1263,8 @@ parse_cmdline (int argc, char *argv[], glusterfs_ctx_t *ctx)
                      (S_ISREG (stbuf.st_mode) || S_ISLNK (stbuf.st_mode))) ||
                     (ret == -1)) {
                         /* Have separate logfile per run */
-                        tm = localtime (&utime);
-                        strftime (timestr, 256, "%Y%m%d.%H%M%S", tm);
+                        gf_time_fmt (timestr, sizeof timestr, time (NULL),
+                                     gf_timefmt_FT);
                         sprintf (tmp_logfile, "%s.%s.%d",
                                  cmd_args->log_file, timestr, getpid ());
 
@@ -1258,7 +1302,7 @@ int
 glusterfs_pidfile_setup (glusterfs_ctx_t *ctx)
 {
         cmd_args_t  *cmd_args = NULL;
-        int          ret = 0;
+        int          ret = -1;
         FILE        *pidfp = NULL;
 
         cmd_args = &ctx->cmd_args;
@@ -1271,7 +1315,7 @@ glusterfs_pidfile_setup (glusterfs_ctx_t *ctx)
                 gf_log ("glusterfsd", GF_LOG_ERROR,
                         "pidfile %s error (%s)",
                         cmd_args->pid_file, strerror (errno));
-                return -1;
+                goto out;
         }
 
         ret = lockf (fileno (pidfp), F_TLOCK, 0);
@@ -1279,7 +1323,7 @@ glusterfs_pidfile_setup (glusterfs_ctx_t *ctx)
                 gf_log ("glusterfsd", GF_LOG_ERROR,
                         "pidfile %s lock error (%s)",
                         cmd_args->pid_file, strerror (errno));
-                return ret;
+                goto out;
         }
 
         gf_log ("glusterfsd", GF_LOG_TRACE,
@@ -1291,12 +1335,17 @@ glusterfs_pidfile_setup (glusterfs_ctx_t *ctx)
                 gf_log ("glusterfsd", GF_LOG_ERROR,
                         "pidfile %s unlock error (%s)",
                         cmd_args->pid_file, strerror (errno));
-                return ret;
+                goto out;
         }
 
         ctx->pidfp = pidfp;
 
-        return 0;
+        ret = 0;
+out:
+        if (ret && pidfp)
+                fclose (pidfp);
+
+        return ret;
 }
 
 
@@ -1502,11 +1551,11 @@ daemonize (glusterfs_ctx_t *ctx)
         case 0:
                 break;
         default:
-                if (ctx->mtab_pid > 0) {
-                        ret = waitpid (ctx->mtab_pid, &cstatus, 0);
-                        if (!(ret == ctx->mtab_pid && cstatus == 0)) {
+                if (ctx->mnt_pid > 0) {
+                        ret = waitpid (ctx->mnt_pid, &cstatus, 0);
+                        if (!(ret == ctx->mnt_pid && cstatus == 0)) {
                                 gf_log ("daemonize", GF_LOG_ERROR,
-                                        "/etc/mtab update failed");
+                                        "mount failed");
                                 exit (1);
                         }
                 }

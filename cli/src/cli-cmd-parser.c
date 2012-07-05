@@ -80,7 +80,7 @@ cli_cmd_bricks_parse (const char **words, int wordcount, int brick_index,
                         goto out;
                 } else {
                         delimiter = strrchr (words[brick_index], ':');
-                        ret = cli_canonicalize_path (delimiter + 1);
+                        ret = gf_canonicalize_path (delimiter + 1);
                         if (ret)
                                 goto out;
                 }
@@ -367,7 +367,7 @@ cli_cmd_volume_create_parse (const char **words, int wordcount, dict_t **options
         ret = dict_set_dynstr (dict, "transport", trans_type);
         if (ret)
                 goto out;
-
+        trans_type = NULL;
 
         ret = dict_set_dynstr (dict, "bricks", bricks);
         if (ret)
@@ -385,6 +385,10 @@ out:
                 if (dict)
                         dict_destroy (dict);
         }
+
+        if (trans_type)
+                GF_FREE (trans_type);
+
         return ret;
 }
 
@@ -979,7 +983,7 @@ cli_cmd_volume_remove_brick_parse (const char **words, int wordcount,
                         goto out;
                 } else {
                         delimiter = strrchr(words[brick_index], ':');
-                        ret = cli_canonicalize_path (delimiter + 1);
+                        ret = gf_canonicalize_path (delimiter + 1);
                         if (ret)
                                 goto out;
                 }
@@ -1073,7 +1077,7 @@ cli_cmd_volume_replace_brick_parse (const char **words, int wordcount,
                 goto out;
         } else {
                 delimiter = strrchr ((char *)words[3], ':');
-                ret = cli_canonicalize_path (delimiter + 1);
+                ret = gf_canonicalize_path (delimiter + 1);
                 if (ret)
                         goto out;
         }
@@ -1094,7 +1098,7 @@ cli_cmd_volume_replace_brick_parse (const char **words, int wordcount,
                 goto out;
         } else {
                 delimiter = strrchr ((char *)words[4], ':');
-                ret = cli_canonicalize_path (delimiter + 1);
+                ret = gf_canonicalize_path (delimiter + 1);
                 if (ret)
                         goto out;
         }
@@ -1202,7 +1206,7 @@ cli_cmd_log_filename_parse (const char **words, int wordcount, dict_t **options)
                         ret = -1;
                         goto out;
                 } else {
-                        ret = cli_canonicalize_path (delimiter + 1);
+                        ret = gf_canonicalize_path (delimiter + 1);
                         if (ret)
                                 goto out;
                 }
@@ -1318,7 +1322,7 @@ cli_cmd_log_locate_parse (const char **words, int wordcount, dict_t **options)
                         ret = -1;
                         goto out;
                 } else {
-                        ret = cli_canonicalize_path (delimiter + 1);
+                        ret = gf_canonicalize_path (delimiter + 1);
                         if (ret)
                                 goto out;
                 }
@@ -1369,7 +1373,7 @@ cli_cmd_log_rotate_parse (const char **words, int wordcount, dict_t **options)
                         ret = -1;
                         goto out;
                 } else {
-                        ret = cli_canonicalize_path (delimiter + 1);
+                        ret = gf_canonicalize_path (delimiter + 1);
                         if (ret)
                                 goto out;
                 }
@@ -1573,11 +1577,36 @@ cli_cmd_gsync_set_parse (const char **words, int wordcount, dict_t **options)
                         }
                         append_str[append_len - 2] = '\0';
 
+                        /* "checkpoint now" is special: we resolve that "now" */
+                        if (strcmp (words[cmdi + 1], "checkpoint") == 0 &&
+                            strcmp (append_str, "now") == 0) {
+                                struct timeval tv = {0,};
+
+                                ret = gettimeofday (&tv, NULL);
+                                if (ret == -1)
+                                         goto out; /* FIXME: free append_str? */
+
+                                GF_FREE (append_str);
+                                append_str = GF_CALLOC (1, 300, cli_mt_append_str);
+                                if (!append_str) {
+                                        ret = -1;
+                                        goto out;
+                                }
+                                strcpy (append_str, "as of ");
+                                gf_time_fmt (append_str + strlen ("as of "),
+                                             300 - strlen ("as of "),
+                                             tv.tv_sec, gf_timefmt_FT);
+                        }
+
                         ret = dict_set_dynstr (dict, "op_value", append_str);
                 }
 
-                if (!subop || dict_set_dynstr (dict, "subop", subop) != 0)
-                        ret = -1;
+                ret = -1;
+                if (subop) {
+                        ret = dict_set_dynstr (dict, "subop", subop);
+                        if (!ret)
+                                subop = NULL;
+                }
         }
 
 out:
@@ -1588,6 +1617,9 @@ out:
                         GF_FREE (append_str);
         } else
                 *options = dict;
+
+        if (subop)
+                GF_FREE (subop);
 
         return ret;
 }
@@ -1672,7 +1704,7 @@ cli_cmd_volume_top_parse (const char **words, int wordcount,
         char    *delimiter      = NULL;
         char    *opwords[]      = { "open", "read", "write", "opendir",
                                     "readdir", "read-perf", "write-perf",
-                                    NULL };
+                                    "clear", NULL };
         char    *w = NULL;
 
         GF_ASSERT (words);
@@ -1717,6 +1749,13 @@ cli_cmd_volume_top_parse (const char **words, int wordcount,
         } else if (strcmp (w, "write-perf") == 0) {
                 top_op = GF_CLI_TOP_WRITE_PERF;
                 perf = 1;
+        } else if (strcmp (w, "clear") == 0) {
+                ret = dict_set_int32 (dict, "clear-stats", 1);
+                if (ret) {
+                        gf_log ("cli", GF_LOG_ERROR,
+                                "Could not set clear-stats in dict");
+                        goto out;
+                }
         } else
                 GF_ASSERT (!"opword mismatch");
         ret = dict_set_int32 (dict, "top-op", (int32_t)top_op);
@@ -1751,7 +1790,7 @@ cli_cmd_volume_top_parse (const char **words, int wordcount,
                                 ret = -1;
                                 goto out;
                         } else {
-                                ret = cli_canonicalize_path (delimiter + 1);
+                                ret = gf_canonicalize_path (delimiter + 1);
                                 if (ret)
                                         goto out;
                         }

@@ -106,7 +106,7 @@ send_fuse_iov (xlator_t *this, fuse_in_header_t *finh, struct iovec *iov_out,
 
         if (!this || !finh || !iov_out) {
                 gf_log ("send_fuse_iov", GF_LOG_ERROR,"Invalid arguments");
-                return -1;
+                return EINVAL;
         }
         priv = this->private;
 
@@ -626,7 +626,7 @@ fuse_fd_inherit_directio (xlator_t *this, fd_t *fd, struct fuse_open_out *foo)
 
         tmp_fd = fd_lookup (fd->inode, 0);
         if (tmp_fd) {
-                tmp_fdctx = fuse_fd_ctx_get (this, fd);
+                tmp_fdctx = fuse_fd_ctx_get (this, tmp_fd);
                 if (tmp_fdctx) {
                         foo->open_flags &= ~FOPEN_DIRECT_IO;
                         foo->open_flags |= (tmp_fdctx->open_flags
@@ -2642,13 +2642,13 @@ fuse_setxattr (xlator_t *this, fuse_in_header_t *finh, void *msg)
                 }
         }
 
-#ifdef DISABLE_SELINUX
-        if (!strncmp (name, "security.", 9)) {
-                send_fuse_err (this, finh, EOPNOTSUPP);
-                GF_FREE (finh);
-                return;
-        }
-#endif
+	if (!priv->selinux) {
+		if (strncmp (name, "security.", 9) == 0) {
+			send_fuse_err (this, finh, EOPNOTSUPP);
+			GF_FREE (finh);
+			return;
+		}
+	}
 
         /* Check if the command is for changing the log
            level of process or specific xlator */
@@ -2914,13 +2914,13 @@ fuse_getxattr (xlator_t *this, fuse_in_header_t *finh, void *msg)
                 }
         }
 
-#ifdef DISABLE_SELINUX
-        if (!strncmp (name, "security.", 9)) {
-                send_fuse_err (this, finh, ENODATA);
-                GF_FREE (finh);
-                return;
-        }
-#endif
+	if (!priv->selinux) {
+		if (strncmp (name, "security.", 9) == 0) {
+			send_fuse_err (this, finh, ENODATA);
+			GF_FREE (finh);
+			return;
+		}
+	}
 
         GET_STATE (this, finh, state);
 
@@ -3867,29 +3867,17 @@ int
 fuse_get_mount_status (xlator_t *this)
 {
         int             kid_status = -1;
-        pid_t           kid_pid = -1;
         fuse_private_t *priv = this->private;
-        int             our_status = -1;
 
         if (read(priv->status_pipe[0],&kid_status, sizeof(kid_status)) < 0) {
                 gf_log (this->name, GF_LOG_ERROR, "could not get mount status");
-                goto out;
+                kid_status = -1;
         }
         gf_log (this->name, GF_LOG_DEBUG, "mount status is %d", kid_status);
 
-        if (read(priv->status_pipe[0],&kid_pid, sizeof(kid_pid)) < 0) {
-                gf_log (this->name, GF_LOG_ERROR, "could not get mount PID");
-                goto out;
-        }
-        gf_log (this->name, GF_LOG_DEBUG, "mount PID is %d", kid_pid);
-
-        (void)waitpid(kid_pid,NULL,0);
-        our_status = kid_status;
-
-out:
         close(priv->status_pipe[0]);
         close(priv->status_pipe[1]);
-        return our_status;
+        return kid_status;
 }
 
 static void *
@@ -4372,7 +4360,7 @@ init (xlator_t *this_xl)
         int                xl_name_allocated = 0;
         int                fsname_allocated = 0;
         glusterfs_ctx_t   *ctx = NULL;
-        gf_boolean_t       sync_mtab = _gf_false;
+        gf_boolean_t       sync_to_mount = _gf_false;
         char              *mnt_args = NULL;
 
         if (this_xl == NULL)
@@ -4496,6 +4484,13 @@ init (xlator_t *this_xl)
         if (priv->uid_map_root)
                 priv->acl = 1;
 
+        priv->selinux = 0;
+        ret = dict_get_str (options, "selinux", &value_string);
+        if (ret == 0) {
+                ret = gf_string2boolean (value_string, &priv->selinux);
+                GF_ASSERT (ret == 0);
+        }
+
         priv->read_only = 0;
         ret = dict_get_str (options, "read-only", &value_string);
         if (ret == 0) {
@@ -4520,11 +4515,11 @@ init (xlator_t *this_xl)
                 priv->fuse_dump_fd = ret;
         }
 
-        sync_mtab = _gf_false;
-        ret = dict_get_str (options, "sync-mtab", &value_string);
+        sync_to_mount = _gf_false;
+        ret = dict_get_str (options, "sync-to-mount", &value_string);
         if (ret == 0) {
                 ret = gf_string2boolean (value_string,
-                                         &sync_mtab);
+                                         &sync_to_mount);
                 GF_ASSERT (ret == 0);
         }
 
@@ -4570,7 +4565,7 @@ init (xlator_t *this_xl)
         }
 
         priv->fd = gf_fuse_mount (priv->mount_point, fsname, mnt_args,
-                                  sync_mtab ? &ctx->mtab_pid : NULL,
+                                  sync_to_mount ? &ctx->mnt_pid : NULL,
                                   priv->status_pipe[1]);
         if (priv->fd == -1)
                 goto cleanup_exit;
@@ -4642,7 +4637,7 @@ fini (xlator_t *this_xl)
         /* Process should terminate once fuse xlator is finished.
          * Required for AUTH_FAILED event.
          */
-        raise (SIGTERM);
+        kill (getpid (), SIGTERM);
 }
 
 struct xlator_fops fops = {
@@ -4682,7 +4677,7 @@ struct volume_options options[] = {
         { .key  = {"uid-map-root"},
           .type = GF_OPTION_TYPE_INT
         },
-        { .key  = {"sync-mtab"},
+        { .key  = {"sync-to-mount"},
           .type = GF_OPTION_TYPE_BOOL
         },
         { .key = {"read-only"},

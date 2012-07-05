@@ -41,6 +41,10 @@
 #include "nfs-mem-types.h"
 #include "nfs3-helpers.h"
 #include "nlm4.h"
+#include "options.h"
+
+#define OPT_SERVER_AUX_GIDS             "nfs.server-aux-gids"
+#define OPT_SERVER_GID_CACHE_TIMEOUT    "nfs.server.aux-gid-timeout"
 
 /* Every NFS version must call this function with the init function
  * for its particular version.
@@ -651,6 +655,25 @@ nfs_init_state (xlator_t *this)
                 }
         }
 
+        nfs->mount_udp = 0;
+        if (dict_get(this->options, "nfs.mount-udp")) {
+                ret = dict_get_str (this->options, "nfs.mount-udp", &optstr);
+                if (ret == -1) {
+                        gf_log (GF_NFS, GF_LOG_ERROR, "Failed to parse dict");
+                        goto free_foppool;
+                }
+
+                ret = gf_string2boolean (optstr, &boolt);
+                if (ret < 0) {
+                        gf_log (GF_NFS, GF_LOG_ERROR, "Failed to parse bool "
+                                "string");
+                        goto free_foppool;
+                }
+
+                if (boolt == _gf_true)
+                        nfs->mount_udp = 1;
+        }
+
         /* support both options rpc-auth.ports.insecure and
          * rpc-auth-allow-insecure for backward compatibility
          */
@@ -710,6 +733,11 @@ nfs_init_state (xlator_t *this)
                         goto free_foppool;
                 }
         }
+
+        GF_OPTION_INIT (OPT_SERVER_AUX_GIDS, nfs->server_aux_gids,
+                        bool, free_foppool);
+        GF_OPTION_INIT (OPT_SERVER_GID_CACHE_TIMEOUT,nfs->aux_gid_max_age,
+                        uint32, free_foppool);
 
         if (stat("/sbin/rpc.statd", &stbuf) == -1) {
                 gf_log (GF_NFS, GF_LOG_WARNING, "/sbin/rpc.statd not found. "
@@ -798,6 +826,9 @@ init (xlator_t *this) {
                 ret = 0;
                 goto err;
         }
+
+        LOCK_INIT(&nfs->aux_gid_lock);
+        nfs->aux_gid_nbuckets = AUX_GID_CACHE_BUCKETS;
 
         gf_log (GF_NFS, GF_LOG_INFO, "NFS service started");
 err:
@@ -946,6 +977,16 @@ out:
         return ret;
 }
 
+extern int32_t
+nlm_priv (xlator_t *this);
+
+int32_t
+nfs_priv (xlator_t *this)
+{
+        return nlm_priv (this);
+}
+
+
 struct xlator_cbks cbks = {
         .forget      = nfs_forget,
 };
@@ -953,6 +994,7 @@ struct xlator_cbks cbks = {
 struct xlator_fops fops = { };
 
 struct xlator_dumpops dumpops = {
+        .priv           = nfs_priv,
         .priv_to_dict   = nfs_priv_to_dict,
 };
 
@@ -1185,6 +1227,31 @@ struct volume_options options[] = {
           .description = "This option, if set to 'off', disables NLM server "
                          "by not registering the service with the portmapper."
                          " Set it to 'on' to re-enable it. Default value: 'on'"
+        },
+
+        { .key = {"nfs.mount-udp"},
+          .type = GF_OPTION_TYPE_BOOL,
+          .description = "set the option to 'on' to enable mountd on UDP. "
+                         "Needed by Solaris NFS clients if NLM support is"
+                         "needed"
+        },
+        { .key = {OPT_SERVER_AUX_GIDS},
+          .type = GF_OPTION_TYPE_BOOL,
+          .default_value = "off",
+          .description = "Let the server look up which groups a user belongs "
+                         "to, overwriting the list passed from the client. "
+                         "This enables support for group lists longer than "
+                         "can be passed through the NFS protocol, but is not "
+                         "secure unless users and groups are well synchronized "
+                         "between clients and servers."
+        },
+        { .key = {OPT_SERVER_GID_CACHE_TIMEOUT},
+          .type = GF_OPTION_TYPE_INT,
+          .min = 0,
+          .max = 3600,
+          .default_value = "5",
+          .description = "Number of seconds to cache auxiliary-GID data, when "
+                         OPT_SERVER_AUX_GIDS " is set."
         },
 
         { .key  = {NULL} },

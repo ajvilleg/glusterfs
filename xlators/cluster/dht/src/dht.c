@@ -332,6 +332,11 @@ reconfigure (xlator_t *this, dict_t *options)
         GF_OPTION_RECONF ("directory-layout-spread", conf->dir_spread_cnt,
                           options, uint32, out);
 
+        if (conf->defrag) {
+                GF_OPTION_RECONF ("rebalance-stats", conf->defrag->stats,
+                                  options, bool, out);
+        }
+
         if (dict_get_str (options, "decommissioned-bricks", &temp_str) == 0) {
                 ret = dht_parse_decommissioned_bricks (this, conf, temp_str);
                 if (ret == -1)
@@ -386,6 +391,8 @@ init (xlator_t *this)
 
                 defrag->is_exiting = 0;
 
+                conf->defrag = defrag;
+
                 ret = dict_get_str (this->options, "node-uuid", &node_uuid);
                 if (ret) {
                         gf_log (this->name, GF_LOG_ERROR, "node-uuid not "
@@ -401,9 +408,8 @@ init (xlator_t *this)
 
                 defrag->cmd = cmd;
 
-                conf->defrag = defrag;
+                defrag->stats = _gf_false;
         }
-
 
         conf->search_unhashed = GF_DHT_LOOKUP_UNHASHED_ON;
         if (dict_get_str (this->options, "lookup-unhashed", &temp_str) == 0) {
@@ -432,6 +438,10 @@ init (xlator_t *this)
         GF_OPTION_INIT ("assert-no-child-down", conf->assert_no_child_down,
                         bool, err);
 
+        if (defrag) {
+                GF_OPTION_INIT ("rebalance-stats", defrag->stats, bool, err);
+        }
+
         ret = dht_init_subvolumes (this, conf);
         if (ret == -1) {
                 goto err;
@@ -452,15 +462,6 @@ init (xlator_t *this)
         LOCK_INIT (&conf->layout_lock);
 
         conf->gen = 1;
-
-        /* Create 'syncop' environment */
-	conf->env = syncenv_new (0);
-        if (!conf->env) {
-                gf_log (this->name, GF_LOG_ERROR,
-                        "failed to create sync environment %s",
-                        strerror (errno));
-                goto err;
-        }
 
         this->local_pool = mem_pool_new (dht_local_t, 512);
         if (!this->local_pool) {
@@ -490,6 +491,9 @@ err:
 
                 if (conf->du_stats)
                         GF_FREE (conf->du_stats);
+
+                if (conf->defrag)
+                        GF_FREE (conf->defrag);
 
                 GF_FREE (conf);
         }
@@ -601,6 +605,10 @@ struct volume_options options[] = {
         },
         { .key = {"node-uuid"},
           .type = GF_OPTION_TYPE_STR,
+        },
+        { .key = {"rebalance-stats"},
+          .type = GF_OPTION_TYPE_BOOL,
+          .default_value = "off",
         },
 
         { .key  = {NULL} },

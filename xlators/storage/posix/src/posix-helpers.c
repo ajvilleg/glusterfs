@@ -663,12 +663,13 @@ posix_handle_pair (xlator_t *this, const char *real_path,
                                                     "supported (try remounting "
                                                     "brick with 'user_xattr' "
                                                     "flag)");
-                        } else if (errno == ENOENT &&
-                                   !posix_special_xattr (marker_xattrs,
-                                                         trav->key)) {
-                                gf_log (this->name, GF_LOG_ERROR,
-                                        "setxattr on %s failed: %s", real_path,
-                                        strerror (errno));
+                        } else if (errno == ENOENT) {
+                                if (!posix_special_xattr (marker_xattrs,
+                                                          trav->key)) {
+                                        gf_log (this->name, GF_LOG_ERROR,
+                                                "setxattr on %s failed: %s",
+                                                real_path, strerror (errno));
+                                }
                         } else {
 
 #ifdef GF_DARWIN_HOST_OS
@@ -833,7 +834,7 @@ posix_janitor_thread_proc (void *data)
                 time (&now);
                 if ((now - priv->last_landfill_check) > priv->janitor_sleep_duration) {
                         gf_log (this->name, GF_LOG_TRACE,
-                                "janitor cleaning out /" GF_REPLICATE_TRASH_DIR);
+                                "janitor cleaning out %s", priv->trash_path);
 
                         nftw (priv->trash_path,
                               janitor_walker,

@@ -247,12 +247,6 @@ typedef enum {
 #define GF_SET_DIR_ONLY       0x4
 #define GF_SET_EPOCH_TIME     0x8 /* used by afr dir lookup selfheal */
 
-/* Directory into which replicate self-heal will move deleted files and
-   directories into. The storage/posix janitor thread will periodically
-   clean up this directory */
-
-#define GF_REPLICATE_TRASH_DIR          ".landfill"
-
 /* key value which quick read uses to get small files in lookup cbk */
 #define GF_CONTENT_KEY "glusterfs.content"
 
@@ -288,6 +282,7 @@ struct _cmd_args {
 	int              debug_mode;
         int              read_only;
         int              acl;
+        int              selinux;
         int              worm;
         int              mac_compat;
 	struct list_head xlator_options;  /* list of xlator_option_t */
@@ -333,6 +328,8 @@ struct _glusterfs_graph {
 typedef struct _glusterfs_graph glusterfs_graph_t;
 
 
+typedef int32_t (*glusterfsd_mgmt_event_notify_fn_t) (int32_t event, void *data,
+                                                      ...);
 struct _glusterfs_ctx {
 	cmd_args_t          cmd_args;
 	char               *process_uuid;
@@ -357,7 +354,7 @@ struct _glusterfs_ctx {
         int                 graph_id; /* Incremented per graph, value should
                                          indicate how many times the graph has
                                          got changed */
-        pid_t               mtab_pid; /* pid of the process which updates the mtab */
+        pid_t               mnt_pid; /* pid of the mount agent */
         int                 process_mode; /*mode in which process is runninng*/
 	struct syncenv      *env;         /* The env pointer to the synctasks */
 
@@ -372,6 +369,8 @@ struct _glusterfs_ctx {
 
         int                 mem_accounting; /* if value is other than 0, it
                                                will be set */
+        glusterfsd_mgmt_event_notify_fn_t notify; /* Used for xlators to make
+                                                     call to fsd-mgmt */
 };
 typedef struct _glusterfs_ctx glusterfs_ctx_t;
 

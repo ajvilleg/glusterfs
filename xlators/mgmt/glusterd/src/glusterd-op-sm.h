@@ -228,8 +228,6 @@ set_xlator_option (dict_t *dict, char *key, char *value);
 
 void
 glusterd_do_replace_brick (void *data);
-int
-glusterd_options_reset (glusterd_volinfo_t *volinfo, char *key, int32_t is_force);
 
 char*
 glusterd_op_sm_state_name_get (int state);
@@ -267,14 +265,8 @@ glusterd_are_all_volumes_stopped ();
 int
 glusterd_stop_bricks (glusterd_volinfo_t *volinfo);
 int
-glusterd_get_gsync_status_mst_slv( glusterd_volinfo_t *volinfo,
-                                   char *slave, dict_t *rsp_dict);
-int
 gsync_status (char *master, char *slave, int *status);
 
-int
-glusterd_gsync_get_param_file (char *prmfile, const char *ext, char *master,
-                                char *slave, char *gl_workdir);
 int
 glusterd_check_gsync_running (glusterd_volinfo_t *volinfo, gf_boolean_t *flag);
 

@@ -7,7 +7,7 @@ import shutil
 import logging
 from threading import Lock, Thread as baseThread
 from errno import EACCES, EAGAIN, EPIPE, ENOTCONN, ECONNABORTED, EINTR, errorcode
-from signal import SIGTERM, SIGKILL
+from signal import signal, SIGTERM, SIGKILL
 from time import sleep
 import select as oselect
 from os import waitpid as owaitpid
@@ -138,6 +138,12 @@ def finalize(*a, **kw):
                     raise
     if gconf.ssh_ctl_dir and not gconf.cpid:
         shutil.rmtree(gconf.ssh_ctl_dir)
+    if getattr(gconf, 'state_socket', None):
+        try:
+            os.unlink(gconf.state_socket)
+        except:
+            if sys.exc_info()[0] == OSError:
+                pass
     if gconf.log_exit:
         logging.info("exiting.")
     sys.stdout.flush()
@@ -271,3 +277,6 @@ def select(*a):
 
 def waitpid (*a):
     return eintr_wrap(owaitpid, OSError, *a)
+
+def set_term_handler(hook=lambda *a: finalize(*a, **{'exval': 1})):
+    signal(SIGTERM, hook)

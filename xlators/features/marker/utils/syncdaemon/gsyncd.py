@@ -17,7 +17,7 @@ from ipaddr import IPAddress, IPNetwork
 
 from gconf import gconf
 from syncdutils import FreeObject, norm, grabpidfile, finalize, log_raise_exception
-from syncdutils import GsyncdError, select
+from syncdutils import GsyncdError, select, set_term_handler
 from configinterface import GConffile
 import resource
 from monitor import monitor
@@ -58,6 +58,25 @@ class GLogger(Logger):
         logging.getLogger().handlers = []
         logging.basicConfig(**lprm)
 
+    @classmethod
+    def _gsyncd_loginit(cls, **kw):
+        lkw = {}
+        if gconf.log_level:
+            lkw['level'] = gconf.log_level
+        if kw.get('log_file'):
+            if kw['log_file'] in ('-', '/dev/stderr'):
+                lkw['stream'] = sys.stderr
+            elif kw['log_file'] == '/dev/stdout':
+                lkw['stream'] = sys.stdout
+            else:
+                lkw['filename'] = kw['log_file']
+
+        cls.setup(label=kw.get('label'), **lkw)
+
+        lkw.update({'saved_label': kw.get('label')})
+        gconf.log_metadata = lkw
+        gconf.log_exit = True
+
 def startup(**kw):
     """set up logging, pidfile grabbing, daemonization"""
     if getattr(gconf, 'pid_file', None) and kw.get('go_daemon') != 'postconn':
@@ -88,26 +107,12 @@ def startup(**kw):
         select((x,), (), ())
         os.close(x)
 
-    lkw = {}
-    if gconf.log_level:
-        lkw['level'] = gconf.log_level
-    if kw.get('log_file'):
-        if kw['log_file'] in ('-', '/dev/stderr'):
-            lkw['stream'] = sys.stderr
-        elif kw['log_file'] == '/dev/stdout':
-            lkw['stream'] = sys.stdout
-        else:
-            lkw['filename'] = kw['log_file']
-
-    GLogger.setup(label=kw.get('label'), **lkw)
-
-    lkw.update({'saved_label': kw.get('label')})
-    gconf.log_metadata = lkw
-    gconf.log_exit = True
+    GLogger._gsyncd_loginit(**kw)
 
 def main():
     """main routine, signal/exception handling boilerplates"""
-    signal.signal(signal.SIGTERM, lambda *a: finalize(*a, **{'exval': 1}))
+    gconf.starttime = time.time()
+    set_term_handler()
     GLogger.setup()
     excont = FreeObject(exval = 0)
     try:
@@ -160,12 +165,21 @@ def main_i():
     op.add_option('--session-owner',       metavar='ID')
     op.add_option('-s', '--ssh-command',   metavar='CMD',   default='ssh')
     op.add_option('--rsync-command',       metavar='CMD',   default='rsync')
-    op.add_option('--rsync-extra',         metavar='ARGS',  default='-S', help=SUPPRESS_HELP)
     op.add_option('--timeout',             metavar='SEC',   type=int, default=120)
     op.add_option('--connection-timeout',  metavar='SEC',   type=int, default=60, help=SUPPRESS_HELP)
     op.add_option('--sync-jobs',           metavar='N',     type=int, default=3)
     op.add_option('--turns',               metavar='N',     type=int, default=0, help=SUPPRESS_HELP)
     op.add_option('--allow-network',       metavar='IPS',   default='')
+    op.add_option('--state-socket-unencoded', metavar='SOCKF', type=str, action='callback', callback=store_abs)
+    op.add_option('--checkpoint',          metavar='LABEL', default='')
+    # tunables for failover/failback mechanism:
+    # None   - gsyncd behaves as normal
+    # blind  - gsyncd works with xtime pairs to identify
+    #          candidates for synchronization
+    # wrapup - same as normal mode but does not assign
+    #          xtimes to orphaned files
+    # see crawl() for usage of the above tunables
+    op.add_option('--special-sync-mode', type=str, help=SUPPRESS_HELP)
 
     op.add_option('-c', '--config-file',   metavar='CONF',  type=str, action='callback', callback=store_local)
     # duh. need to specify dest or value will be mapped to None :S
@@ -278,6 +292,7 @@ def main_i():
         rconf['config_file'] = os.path.join(os.path.dirname(sys.argv[0]), "conf/gsyncd.conf")
     gcnf = GConffile(rconf['config_file'], canon_peers, defaults.__dict__, opts.__dict__, namedict)
 
+    checkpoint_change = False
     if confdata:
         opt_ok = norm(confdata.opt) in tunables + [None]
         if confdata.op == 'check':
@@ -293,7 +308,14 @@ def main_i():
             gcnf.set(confdata.opt, confdata.val, confdata.rx)
         elif confdata.op == 'del':
             gcnf.delete(confdata.opt, confdata.rx)
-        return
+        # when modifying checkpoint, it's important to make a log
+        # of that, so in that case we go on to set up logging even
+        # if its just config invocation
+        if confdata.opt == 'checkpoint' and confdata.op in ('set', 'del') and \
+           not confdata.rx:
+            checkpoint_change = True
+        if not checkpoint_change:
+            return
 
     gconf.__dict__.update(defaults.__dict__)
     gcnf.update_to(gconf.__dict__)
@@ -330,6 +352,14 @@ def main_i():
         if lvl2 == "Level " + lvl1:
             raise GsyncdError('cannot recognize log level "%s"' % lvl0)
         gconf.log_level = lvl2
+
+    if checkpoint_change:
+        GLogger._gsyncd_loginit(log_file=gconf.log_file, label='conf')
+        if confdata.op == 'set':
+            logging.info('checkpoint %s set' % confdata.val)
+        elif confdata.op == 'del':
+            logging.info('checkpoint info was reset')
+        return
 
     go_daemon = rconf['go_daemon']
     be_monitor = rconf.get('monitor')

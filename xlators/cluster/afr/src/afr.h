@@ -130,6 +130,7 @@ typedef struct _afr_private {
         gf_boolean_t entry_change_log;      /* on/off */
 
         int read_child;               /* read-subvolume */
+        unsigned int hash_mode;       /* for when read_child is not set */
         int favorite_child;  /* subvolume to be preferred in resolving
                                          split-brain cases */
 
@@ -150,11 +151,14 @@ typedef struct _afr_private {
         struct list_head saved_fds;   /* list of fds on which locks have succeeded */
         gf_boolean_t      optimistic_change_log;
         gf_boolean_t      eager_lock;
+	uint32_t          post_op_delay_secs;
         unsigned int      quorum_count;
 
         char                   vol_uuid[UUID_SIZE + 1];
         int32_t                *last_event;
         afr_self_heald_t       shd;
+        gf_boolean_t           choose_local;
+        gf_boolean_t           did_discovery;
 } afr_private_t;
 
 typedef struct {
@@ -377,7 +381,7 @@ typedef struct _afr_local {
         unsigned char read_child_returned;
         unsigned int first_up_child;
 
-        pid_t saved_pid;
+	gf_lkowner_t  saved_lk_owner;
 
         int32_t op_ret;
         int32_t op_errno;
@@ -410,6 +414,7 @@ typedef struct _afr_local {
 
         dict_t  *dict;
         int      optimistic_change_log;
+	gf_boolean_t      delayed_post_op;
 
         gf_boolean_t    fop_paused;
         int (*fop_call_continue) (call_frame_t *frame, xlator_t *this);
@@ -696,6 +701,7 @@ typedef struct _afr_local {
 
         mode_t          umask;
         int             xflag;
+        gf_boolean_t    do_discovery;
 } afr_local_t;
 
 typedef enum {
@@ -729,6 +735,11 @@ typedef struct {
 
         unsigned char *locked_on; /* which subvolumes locks have been successful */
 	struct list_head  paused_calls; /* queued calls while fix_open happens  */
+
+	/* used for delayed-post-op optimization */
+	pthread_mutex_t    delay_lock;
+	gf_timer_t        *delay_timer;
+	call_frame_t      *delay_frame;
 } afr_fd_ctx_t;
 
 
@@ -936,12 +947,13 @@ afr_first_up_child (unsigned char *child_up, size_t child_count);
 int
 afr_select_read_child_from_policy (int32_t *fresh_children, int32_t child_count,
                                    int32_t prev_read_child,
-                                   int32_t config_read_child, int32_t *sources);
+                                   int32_t config_read_child, int32_t *sources,
+                                   unsigned int hmode, uuid_t gfid);
 
 void
 afr_set_read_ctx_from_policy (xlator_t *this, inode_t *inode,
                               int32_t *fresh_children, int32_t prev_read_child,
-                              int32_t config_read_child);
+                              int32_t config_read_child, uuid_t gfid);
 
 int32_t
 afr_get_call_child (xlator_t *this, unsigned char *child_up, int32_t read_child,

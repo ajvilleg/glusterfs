@@ -125,6 +125,7 @@ typedef struct {
         gf_boolean_t      valgrind;
 #endif
         pthread_t       brick_thread;
+        void           *hooks_priv;
         xlator_t       *xl;  /* Should be set to 'THIS' before creating thread */
 } glusterd_conf_t;
 
@@ -229,6 +230,7 @@ struct glusterd_volinfo_ {
         glusterd_defrag_info_t  *defrag;
         gf_cli_defrag_type      defrag_cmd;
         uint64_t                rebalance_failures;
+        double                  rebalance_time;
 
         /* Replace brick status */
         gf_rb_status_t          rb_status;
@@ -280,7 +282,7 @@ enum glusterd_vol_comp_status_ {
         GLUSTERD_VOL_COMP_RJT,
 };
 
-#define GLUSTERD_DEFAULT_WORKDIR "/etc/glusterd"
+#define GLUSTERD_DEFAULT_WORKDIR "/var/lib/glusterd"
 #define GLUSTERD_DEFAULT_PORT    GF_DEFAULT_BASE_PORT
 #define GLUSTERD_INFO_FILE      "glusterd.info"
 #define GLUSTERD_VOLUME_DIR_PREFIX "vols"
@@ -360,6 +362,20 @@ typedef ssize_t (*gd_serialize_t) (struct iovec outmsg, void *args);
                            uuid_utoa(priv->uuid));                      \
         } while (0)
 
+
+int glusterd_uuid_init();
+
+#define MY_UUID (__glusterd_uuid())
+
+static inline unsigned char *
+__glusterd_uuid()
+{
+	glusterd_conf_t *priv = THIS->private;
+
+	if (uuid_is_null (priv->uuid))
+		glusterd_uuid_init();
+	return &priv->uuid[0];
+}
 
 int32_t
 glusterd_brick_from_brickinfo (glusterd_brickinfo_t *brickinfo,

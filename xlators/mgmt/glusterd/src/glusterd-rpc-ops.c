@@ -1033,8 +1033,10 @@ glusterd_volume_status_add_peer_rsp (dict_t *this, char *key, data_t *value,
         if (index > rsp_ctx->brick_index_max) {
                 snprintf (new_key, sizeof (new_key), "brick%d.%s",
                           index + rsp_ctx->other_count, brick_key);
-        } else
+        } else {
                 strncpy (new_key, key, sizeof (new_key));
+                new_key[sizeof (new_key) - 1] = 0;
+        }
 
         ret = dict_set (rsp_ctx->dict, new_key, new_value);
         if (ret)
@@ -1118,6 +1120,7 @@ glusterd_volume_rebalance_use_rsp_dict (dict_t *rsp_dict)
         int32_t        i        = 0;
         char          *node_uuid = NULL;
         char          *node_uuid_str = NULL;
+        double         elapsed_time = 0;
 
         GF_ASSERT (rsp_dict);
 
@@ -1226,6 +1229,19 @@ glusterd_volume_rebalance_use_rsp_dict (dict_t *rsp_dict)
                 if (ret) {
                         gf_log (THIS->name, GF_LOG_DEBUG,
                                 "failed to set failure count");
+                }
+        }
+
+        memset (key, 0, 256);
+        snprintf (key, 256, "run-time-%d", index);
+        ret = dict_get_double (rsp_dict, key, &elapsed_time);
+        if (!ret) {
+                memset (key, 0, 256);
+                snprintf (key, 256, "run-time-%d", i);
+                ret = dict_set_double (ctx_dict, key, elapsed_time);
+                if (ret) {
+                        gf_log (THIS->name, GF_LOG_DEBUG,
+                                "failed to set run-time");
                 }
         }
 
@@ -1446,7 +1462,7 @@ glusterd3_1_probe (call_frame_t *frame, xlator_t *this,
         if (ret)
                 goto out;
 
-        uuid_copy (req.uuid, priv->uuid);
+        uuid_copy (req.uuid, MY_UUID);
         req.hostname = gf_strdup (hostname);
         req.port = port;
 
@@ -1491,7 +1507,7 @@ glusterd3_1_friend_add (call_frame_t *frame, xlator_t *this,
         if (ret)
                 goto out;
 
-        uuid_copy (req.uuid, priv->uuid);
+        uuid_copy (req.uuid, MY_UUID);
         req.hostname = peerinfo->hostname;
         req.port = peerinfo->port;
 
@@ -1539,7 +1555,7 @@ glusterd3_1_friend_remove (call_frame_t *frame, xlator_t *this,
 
         peerinfo = event->peerinfo;
 
-        uuid_copy (req.uuid, priv->uuid);
+        uuid_copy (req.uuid, MY_UUID);
         req.hostname = peerinfo->hostname;
         req.port = peerinfo->port;
         ret = glusterd_submit_request (peerinfo->rpc, &req, frame, peerinfo->peer,
@@ -1584,7 +1600,7 @@ glusterd3_1_friend_update (call_frame_t *frame, xlator_t *this,
         req.friends.friends_val = dict_buf;
         req.friends.friends_len = len;
 
-        uuid_copy (req.uuid, priv->uuid);
+        uuid_copy (req.uuid, MY_UUID);
 
         dummy_frame = create_frame (this, this->ctx->pool);
         ret = glusterd_submit_request (peerinfo->rpc, &req, dummy_frame,

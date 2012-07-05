@@ -58,7 +58,7 @@ typedef enum {
         IOS_STATS_TYPE_READDIRP,
         IOS_STATS_TYPE_READ_THROUGHPUT,
         IOS_STATS_TYPE_WRITE_THROUGHPUT,
-        IOS_STATS_TYPE_MAX,
+        IOS_STATS_TYPE_MAX
 }ios_stats_type_t;
 
 typedef enum {
@@ -293,43 +293,43 @@ is_fop_latency_started (call_frame_t *frame)
                 }                                                               \
                 UNLOCK (&iosstat->lock);                                        \
                 ios_stat_add_to_list (&conf->list[type],                        \
-				     value, iosstat);                           \
+                                     value, iosstat);                           \
                                                                                 \
         } while (0)
 
 
 #define BUMP_THROUGHPUT(iosstat, type)						\
         do {									\
-	        struct ios_conf         *conf = NULL;				\
-		double                   elapsed;				\
-		struct timeval          *begin, *end;				\
-		double                   throughput;				\
+                struct ios_conf         *conf = NULL;				\
+                double                   elapsed;				\
+                struct timeval          *begin, *end;				\
+                double                   throughput;				\
                int                      flag = 0;                              \
-										\
-		begin = &frame->begin;						\
-		end   = &frame->end;						\
-										\
-		elapsed = (end->tv_sec - begin->tv_sec) * 1e6			\
-			+ (end->tv_usec - begin->tv_usec);			\
-		throughput = op_ret / elapsed;					\
-										\
-		conf = this->private;						\
-		LOCK(&iosstat->lock);						\
-		{								\
-			if (iosstat->thru_counters[type].throughput             \
+                                                                                \
+                begin = &frame->begin;						\
+                end   = &frame->end;						\
+                                                                                \
+                elapsed = (end->tv_sec - begin->tv_sec) * 1e6			\
+                        + (end->tv_usec - begin->tv_usec);			\
+                throughput = op_ret / elapsed;					\
+                                                                                \
+                conf = this->private;						\
+                LOCK(&iosstat->lock);						\
+                {								\
+                        if (iosstat->thru_counters[type].throughput             \
                                 <= throughput) {                                \
-				iosstat->thru_counters[type].throughput =       \
+                                iosstat->thru_counters[type].throughput =       \
                                                                 throughput;     \
-				gettimeofday (&iosstat->                        \
+                                gettimeofday (&iosstat->                        \
                                              thru_counters[type].time, NULL);   \
                                flag = 1;                                       \
                         }							\
                 }								\
-        	UNLOCK (&iosstat->lock);					\
+                UNLOCK (&iosstat->lock);					\
                if (flag)                                                       \
                        ios_stat_add_to_list (&conf->thru_list[type],           \
                                                throughput, iosstat);           \
-	} while (0)
+        } while (0)
 
 int
 ios_fd_ctx_get (fd_t *fd, xlator_t *this, struct ios_fd **iosfd)
@@ -484,12 +484,12 @@ ios_stat_add_to_list (struct ios_stat_head *list_head, uint64_t value,
                         new = GF_CALLOC (1, sizeof (*new),
                                         gf_io_stats_mt_ios_stat_list);
                         new->iosstat = iosstat;
-                        new->value = value; 
+                        new->value = value;
                         ios_stat_ref (iosstat);
-                        list_add_tail (&new->list, &tmp->list);  
+                        list_add_tail (&new->list, &tmp->list);
                         stat = last->iosstat;
                         last->iosstat = NULL;
-                        ios_stat_unref (stat); 
+                        ios_stat_unref (stat);
                         list_del (&last->list);
                         GF_FREE (last);
                         if (reposition == MAX_LIST_MEMBERS)
@@ -511,7 +511,7 @@ ios_stat_add_to_list (struct ios_stat_head *list_head, uint64_t value,
                         list_head->members++;
                         if (list_head->min_cnt > value)
                                 list_head->min_cnt = value;
-                } 
+                }
         }
 out:
         UNLOCK (&list_head->lock);
@@ -568,19 +568,16 @@ ios_dump_throughput_stats (struct ios_stat_head *list_head, xlator_t *this,
                             FILE* logfp, ios_stats_type_t type)
 {
         struct ios_stat_list *entry = NULL;
-        struct timeval        time = {0, };
-        struct tm             *tm = NULL;
+        struct timeval        time  = {0, };
         char                  timestr[256] = {0, };
 
         LOCK (&list_head->lock);
         {
                 list_for_each_entry (entry, &list_head->iosstats->list, list) {
-                        time = entry->iosstat->thru_counters[type].time;
-                        tm    = localtime (&time.tv_sec);
-                        if (!tm)
-                                continue;
-                        strftime (timestr, 256, "%Y-%m-%d %H:%M:%S", tm);
-                        snprintf (timestr + strlen (timestr), 256 - strlen (timestr),
+                        gf_time_fmt (timestr, sizeof timestr,
+                                     entry->iosstat->thru_counters[type].time.tv_sec,
+                                     gf_timefmt_FT);
+                        snprintf (timestr + strlen (timestr), sizeof timestr - strlen (timestr),
                           ".%"GF_PRI_SUSECONDS, time.tv_usec);
 
                         ios_log (this, logfp, "%s \t %-10.2f  \t  %s",
@@ -600,7 +597,6 @@ io_stats_dump_global_to_logfp (xlator_t *this, struct ios_global_stats *stats,
         int                   index = 0;
         struct ios_stat_head *list_head = NULL;
         struct ios_conf      *conf = NULL;
-        struct tm            *tm = NULL;
         char                  timestr[256] = {0, };
         char                  str_header[128] = {0};
         char                  str_read[128] = {0};
@@ -694,9 +690,10 @@ io_stats_dump_global_to_logfp (xlator_t *this, struct ios_global_stats *stats,
         if (interval == -1) {
                 LOCK (&conf->lock);
                 {
-                        tm = localtime (&conf->cumulative.max_openfd_time.tv_sec);
-                        strftime (timestr, 256, "%Y-%m-%d %H:%M:%S", tm);
-                        snprintf (timestr + strlen (timestr), 256 - strlen (timestr),
+                        gf_time_fmt (timestr, sizeof timestr,
+                                     conf->cumulative.max_openfd_time.tv_sec,
+                                     gf_timefmt_FT);
+                        snprintf (timestr + strlen (timestr), sizeof timestr - strlen (timestr),
                                   ".%"GF_PRI_SUSECONDS,
                                   conf->cumulative.max_openfd_time.tv_usec);
                         ios_log (this, logfp, "Current open fd's: %"PRId64
@@ -735,13 +732,13 @@ io_stats_dump_global_to_logfp (xlator_t *this, struct ios_global_stats *stats,
                 ios_log (this, logfp, "\nTIMESTAMP \t\t\t THROUGHPUT(KBPS)"
                          "\tFILE NAME");
                 list_head = &conf->thru_list[IOS_STATS_THRU_READ];
-		ios_dump_throughput_stats(list_head, this, logfp, IOS_STATS_THRU_READ);
+                ios_dump_throughput_stats(list_head, this, logfp, IOS_STATS_THRU_READ);
 
                 ios_log (this, logfp, "\n======Write Throughput File Stats======");
                 ios_log (this, logfp, "\nTIMESTAMP \t\t\t THROUGHPUT(KBPS)"
                          "\tFILE NAME");
                 list_head = &conf->thru_list[IOS_STATS_THRU_WRITE];
-		ios_dump_throughput_stats (list_head, this, logfp, IOS_STATS_THRU_WRITE);
+                ios_dump_throughput_stats (list_head, this, logfp, IOS_STATS_THRU_WRITE);
         }
         return 0;
 }
@@ -1080,36 +1077,44 @@ io_stats_dump_stats_to_dict (xlator_t *this, dict_t *resp,
         struct ios_stat_list    *entry = NULL;
         int                      ret = -1;
         ios_stats_thru_t         index = IOS_STATS_THRU_MAX;
-        struct tm               *tm = NULL;
         char                     timestr[256] = {0, };
+        char                    *dict_timestr = NULL;
 
         conf = this->private;
 
         switch (flags) {
-                case IOS_STATS_TYPE_OPEN: 
+                case IOS_STATS_TYPE_OPEN:
                         list_head = &conf->list[IOS_STATS_TYPE_OPEN];
                         LOCK (&conf->lock);
                         {
                                 ret = dict_set_uint64 (resp, "current-open",
                                                      conf->cumulative.nr_opens);
                                 if (ret)
-                                        goto out;
+                                        goto unlock;
                                 ret = dict_set_uint64 (resp, "max-open",
                                                        conf->cumulative.max_nr_opens);
 
-                                tm = localtime (&conf->cumulative.max_openfd_time.tv_sec);
-                                strftime (timestr, 256, "%Y-%m-%d %H:%M:%S", tm);
-                                snprintf (timestr + strlen (timestr), 256 - strlen (timestr),
+                                gf_time_fmt (timestr, sizeof timestr,
+                                             conf->cumulative.max_openfd_time.tv_sec,
+                                             gf_timefmt_FT);
+                                snprintf (timestr + strlen (timestr), sizeof timestr - strlen (timestr),
                                           ".%"GF_PRI_SUSECONDS,
                                           conf->cumulative.max_openfd_time.tv_usec);
 
-                                ret = dict_set_str (resp, "max-openfd-time",
-                                                    timestr);
+                                dict_timestr = gf_strdup (timestr);
+                                if (!dict_timestr)
+                                        goto unlock;
+                                ret = dict_set_dynstr (resp, "max-openfd-time",
+                                                       dict_timestr);
                                 if (ret)
-                                        goto out;
+                                        goto unlock;
                         }
+        unlock:
                         UNLOCK (&conf->lock);
-
+                        /* Do not proceed if we came here because of some error
+                         * during the dict operation */
+                        if (ret)
+                                goto out;
                         break;
                 case IOS_STATS_TYPE_READ:
                         list_head = &conf->list[IOS_STATS_TYPE_READ];
@@ -1125,7 +1130,7 @@ io_stats_dump_stats_to_dict (xlator_t *this, dict_t *resp,
                         break;
                 case IOS_STATS_TYPE_READ_THROUGHPUT:
                         list_head = &conf->thru_list[IOS_STATS_THRU_READ];
-                        index = IOS_STATS_THRU_READ; 
+                        index = IOS_STATS_THRU_READ;
                         break;
                 case IOS_STATS_TYPE_WRITE_THROUGHPUT:
                         list_head = &conf->thru_list[IOS_STATS_THRU_WRITE];
@@ -1146,30 +1151,34 @@ io_stats_dump_stats_to_dict (xlator_t *this, dict_t *resp,
                         snprintf (key, 256, "%s-%d", "filename", cnt);
                         ret = dict_set_str (resp, key, entry->iosstat->filename);
                         if (ret)
-                                goto out;
+                                goto unlock_list_head;
                          snprintf (key, 256, "%s-%d", "value",cnt);
                          ret = dict_set_uint64 (resp, key, entry->value);
                          if (ret)
-                                 goto out;
+                                 goto unlock_list_head;
                          if (index != IOS_STATS_THRU_MAX) {
                                  snprintf (key, 256, "%s-%d", "time-sec", cnt);
-                                 ret = dict_set_int32 (resp, key, 
+                                 ret = dict_set_int32 (resp, key,
                                          entry->iosstat->thru_counters[index].time.tv_sec);
                                  if (ret)
-                                         goto out;
+                                         goto unlock_list_head;
                                  snprintf (key, 256, "%s-%d", "time-usec", cnt);
-                                 ret = dict_set_int32 (resp, key, 
+                                 ret = dict_set_int32 (resp, key,
                                          entry->iosstat->thru_counters[index].time.tv_usec);
                                  if (ret)
-                                         goto out;
+                                         goto unlock_list_head;
                          }
                          if (cnt == list_cnt)
                                  break;
 
                 }
         }
+unlock_list_head:
         UNLOCK (&list_head->lock);
-
+        /* ret is !=0 if some dict operation in the above critical region
+         * failed. */
+        if (ret)
+                goto out;
         ret = dict_set_int32 (resp, "members", cnt);
  out:
         return ret;
@@ -1246,7 +1255,7 @@ io_stats_open_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         struct   ios_stat *iosstat = NULL;
         struct ios_conf   *conf = NULL;
 
-	conf = this->private;
+        conf = this->private;
         path = frame->local;
         frame->local = NULL;
 
@@ -1270,6 +1279,16 @@ io_stats_open_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         ios_fd_ctx_set (fd, this, iosfd);
 
         ios_inode_ctx_get (fd->inode, this, &iosstat);
+        if (!iosstat) {
+                iosstat = GF_CALLOC (1, sizeof (*iosstat),
+                                     gf_io_stats_mt_ios_stat);
+                if (iosstat) {
+                        iosstat->filename = gf_strdup (path);
+                        uuid_copy (iosstat->gfid, fd->inode->gfid);
+                        LOCK_INIT (&iosstat->lock);
+                        ios_inode_ctx_set (fd->inode, this, iosstat);
+                }
+        }
 
         LOCK (&conf->lock);
         {
@@ -1352,7 +1371,7 @@ io_stats_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 ios_inode_ctx_get (inode, this, &iosstat);
                 if (iosstat) {
                         BUMP_STATS (iosstat, IOS_STATS_TYPE_WRITE);
-			BUMP_THROUGHPUT (iosstat, IOS_STATS_THRU_WRITE);
+                        BUMP_THROUGHPUT (iosstat, IOS_STATS_THRU_WRITE);
                         inode = NULL;
                         iosstat = NULL;
                 }
@@ -2408,7 +2427,7 @@ io_stats_release (xlator_t *this, fd_t *fd)
 
         LOCK (&conf->lock);
         {
-		conf->cumulative.nr_opens--;
+                conf->cumulative.nr_opens--;
         }
         UNLOCK (&conf->lock);
 
@@ -2442,6 +2461,95 @@ io_stats_forget (xlator_t *this, inode_t *inode)
         return 0;
 }
 
+static int
+ios_init_top_stats (struct ios_conf *conf)
+{
+        int     i = 0;
+
+        GF_ASSERT (conf);
+
+        for (i = 0; i <IOS_STATS_TYPE_MAX; i++) {
+                conf->list[i].iosstats = GF_CALLOC (1,
+                                         sizeof(*conf->list[i].iosstats),
+                                         gf_io_stats_mt_ios_stat);
+
+                if (!conf->list[i].iosstats)
+                        return -1;
+
+                INIT_LIST_HEAD(&conf->list[i].iosstats->list);
+                LOCK_INIT (&conf->list[i].lock);
+        }
+
+        for (i = 0; i < IOS_STATS_THRU_MAX; i ++) {
+                conf->thru_list[i].iosstats = GF_CALLOC (1,
+                                 sizeof (*conf->thru_list[i].iosstats),
+                                 gf_io_stats_mt_ios_stat);
+
+                if (!conf->thru_list[i].iosstats)
+                        return -1;
+
+                INIT_LIST_HEAD(&conf->thru_list[i].iosstats->list);
+                LOCK_INIT (&conf->thru_list[i].lock);
+        }
+
+        return 0;
+}
+
+static void
+ios_destroy_top_stats (struct ios_conf *conf)
+{
+        int                     i = 0;
+        struct ios_stat_head    *list_head = NULL;
+        struct ios_stat_list    *entry     = NULL;
+        struct ios_stat_list    *tmp       = NULL;
+        struct ios_stat_list    *list      = NULL;
+        struct ios_stat         *stat      = NULL;
+
+        GF_ASSERT (conf);
+
+        LOCK (&conf->lock);
+
+        conf->cumulative.nr_opens = 0;
+        conf->cumulative.max_nr_opens = 0;
+        conf->cumulative.max_openfd_time.tv_sec = 0;
+        conf->cumulative.max_openfd_time.tv_usec = 0;
+
+        for (i = 0; i < IOS_STATS_TYPE_MAX; i++) {
+                list_head = &conf->list[i];
+                if (!list_head)
+                        continue;
+                list_for_each_entry_safe (entry, tmp,
+                                          &list_head->iosstats->list, list) {
+                        list = entry;
+                        stat = list->iosstat;
+                        ios_stat_unref (stat);
+                        list_del (&list->list);
+                        if (list)
+                                GF_FREE (list);
+                        list_head->members--;
+                }
+        }
+
+        for (i = 0; i < IOS_STATS_THRU_MAX; i++) {
+                list_head = &conf->thru_list[i];
+                if (!list_head)
+                        continue;
+                list_for_each_entry_safe (entry, tmp,
+                                          &list_head->iosstats->list, list) {
+                        list = entry;
+                        stat = list->iosstat;
+                        ios_stat_unref (stat);
+                        list_del (&list->list);
+                        if (list)
+                                GF_FREE (list);
+                        list_head->members--;
+                }
+        }
+
+        UNLOCK (&conf->lock);
+
+        return;
+}
 
 int
 reconfigure (xlator_t *this, dict_t *options)
@@ -2509,7 +2617,6 @@ int
 init (xlator_t *this)
 {
         struct ios_conf    *conf = NULL;
-        int                 i = 0;
         char               *sys_log_str = NULL;
         int                 sys_log_level = -1;
         char               *log_str = NULL;
@@ -2546,35 +2653,9 @@ init (xlator_t *this)
         gettimeofday (&conf->cumulative.started_at, NULL);
         gettimeofday (&conf->incremental.started_at, NULL);
 
-        for (i = 0; i <IOS_STATS_TYPE_MAX; i++) {
-                conf->list[i].iosstats = GF_CALLOC (1,
-                                         sizeof(*conf->list[i].iosstats),
-                                         gf_io_stats_mt_ios_stat);
-
-                if (!conf->list[i].iosstats) {
-                        gf_log (this->name, GF_LOG_ERROR,
-                               "Out of memory");
-                        return -1;
-                }
-
-                INIT_LIST_HEAD(&conf->list[i].iosstats->list);
-                LOCK_INIT (&conf->list[i].lock);
-        }
-
-	for (i = 0; i < IOS_STATS_THRU_MAX; i ++) {
-		conf->thru_list[i].iosstats = GF_CALLOC (1,
-		                 sizeof (*conf->thru_list[i].iosstats),
-				 gf_io_stats_mt_ios_stat);
-
-	        if (!conf->thru_list[i].iosstats) {
-        	        gf_log (this->name, GF_LOG_ERROR,
-                        "Out of memory");
-                	return -1;
-        	}
-
-		INIT_LIST_HEAD(&conf->thru_list[i].iosstats->list);
-		LOCK_INIT (&conf->thru_list[i].lock);
-        }
+        ret = ios_init_top_stats (conf);
+        if (ret)
+                return -1;
 
         GF_OPTION_INIT ("dump-fd-stats", conf->dump_fd_stats, bool, out);
 
@@ -2606,12 +2687,6 @@ void
 fini (xlator_t *this)
 {
         struct ios_conf *conf = NULL;
-        struct ios_stat_head *list_head = NULL;
-        struct ios_stat_list *entry     = NULL;
-        struct ios_stat_list *tmp       = NULL;
-        struct ios_stat_list *list      = NULL;
-        struct ios_stat      *stat      = NULL;
-        int    i                        = 0;
 
         if (!this)
                 return;
@@ -2622,35 +2697,7 @@ fini (xlator_t *this)
                 return;
         this->private = NULL;
 
-        for (i = 0; i < IOS_STATS_TYPE_MAX; i++) {
-                list_head = &conf->list[i];
-                if (!list_head)
-                        continue;
-                list_for_each_entry_safe (entry, tmp,
-                                          &list_head->iosstats->list, list) {
-                        list = entry;
-                        stat = list->iosstat;
-                        ios_stat_unref (stat);
-                        list_del (&list->list);
-                        if (list)
-                                GF_FREE (list);
-                }
-        }
-
-        for (i = 0; i < IOS_STATS_THRU_MAX; i++) {
-                list_head = &conf->thru_list[i];
-                if (!list_head)
-                        continue;
-                list_for_each_entry_safe (entry, tmp,
-                                          &list_head->iosstats->list, list) {
-                        list = entry;
-                        stat = list->iosstat;
-                        ios_stat_unref (stat);
-                        list_del (&list->list);
-                        if (list)
-                                GF_FREE (list);
-                }
-        }
+        ios_destroy_top_stats (conf);
 
         if (conf)
                 GF_FREE(conf);
@@ -2659,7 +2706,6 @@ fini (xlator_t *this)
                 "io-stats translator unloaded");
         return;
 }
-
 
 int
 notify (xlator_t *this, int32_t event, void *data, ...)
@@ -2680,6 +2726,28 @@ notify (xlator_t *this, int32_t event, void *data, ...)
         va_end (ap);
         switch (event) {
         case GF_EVENT_TRANSLATOR_INFO:
+                ret = dict_get_str_boolean (dict, "clear-stats", _gf_false);
+                if (ret) {
+                         ret = dict_set_int32 (output, "top-op", top_op);
+                        if (ret) {
+                                gf_log (this->name, GF_LOG_ERROR,
+                                        "Failed to set top-op in dict");
+                                goto out;
+                        }
+                        ios_destroy_top_stats (this->private);
+                        ret = ios_init_top_stats (this->private);
+                        if (ret)
+                                gf_log (this->name, GF_LOG_ERROR,
+                                        "Failed to reset top stats");
+                        ret = dict_set_int32 (output, "stats-cleared",
+                                              ret ? 0 : 1);
+                        if (ret)
+                                gf_log (this->name, GF_LOG_ERROR,
+                                        "Failed to set stats-cleared"
+                                        " in dict");
+                        goto out;
+                }
+
                 ret = dict_get_int32 (dict, "top-op", &top_op);
                 if (!ret) {
                         ret = dict_get_int32 (dict, "list-cnt", &list_cnt);

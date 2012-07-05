@@ -35,7 +35,7 @@ Summary: Cluster File System
 Name: @PACKAGE_NAME@
 Version: %{version}
 Release: %{release}
-License: GPLv3+
+License: GPLv2 or LGPLv3+
 Group: System Environment/Base
 Vendor: Gluster Inc
 Packager: @PACKAGE_BUGREPORT@
@@ -72,13 +72,12 @@ terms of features and extensibility.  It borrows a powerful concept
 called Translators from GNU Hurd kernel. Much of the code in GlusterFS
 is in userspace and easily manageable.
 
-This package includes the glusterfs binary, the glusterd daemon and the gluster
-command line, libglusterfs and glusterfs translator modules common to both
-GlusterFS server and client framework.
+This package includes libraries and utility scripts.
 
 %if 0%{!?_without_rdma:1}
 %package rdma
 Summary: GlusterFS rdma support for ib-verbs
+License: GPLv2 or LGPLv3+
 Group: Applications/File
 BuildRequires: libibverbs-devel
 
@@ -100,6 +99,7 @@ This package provides support to ib-verbs library.
 %if 0%{!?_without_georeplication:1}
 %package geo-replication
 Summary: GlusterFS Geo-replication
+License: GPLv3+
 Group: Applications/File
 Requires: %{name} = %{version}-%{release} , python-ctypes , rsync >= 3.0.0
 
@@ -118,6 +118,7 @@ This package provides support to geo-replication.
 
 %package fuse
 Summary: GlusterFS Fuse client
+License: GPLv2 or LGPLv3+
 Group: Applications/File
 
 Requires: %{name} >= %{version}-%{release}
@@ -138,6 +139,7 @@ This package provides support to FUSE based clients.
 
 %package server
 Summary:          Clustered file-system server
+License:          GPLv3+
 Group:            System Environment/Daemons
 Requires:         %{name} = %{version}-%{release}
 Requires:         %{name}-fuse = %{version}-%{release}
@@ -152,10 +154,12 @@ terms of features and extensibility.  It borrows a powerful concept
 called Translators from GNU Hurd kernel. Much of the code in GlusterFS
 is in user space and easily manageable.
 
-This package provides the glusterfs server daemon.
+This package provides the glusterfs server daemon and translators that
+are loaded on the server.
 
 %package devel
 Summary:        Development Libraries
+License:        GPLv2 or LGPLv3+
 Group:          Development/Libraries
 Requires:       %{name} = %{version}-%{release}
 
@@ -255,6 +259,7 @@ fi
 %{_sbindir}/glusterfs*
 %{_mandir}/man8/*gluster*.8*
 %dir %{_localstatedir}/log/glusterfs
+%dir %{_sharedstatedir}/glusterd
 %if 0%{!?_without_rdma:1}
 %exclude %{_libdir}/glusterfs/%{version}/rpc-transport/rdma*
 %endif
@@ -283,6 +288,8 @@ fi
 %defattr(-,root,root)
 %{_libexecdir}/glusterfs/gsyncd
 %{_libexecdir}/glusterfs/python/syncdaemon/*
+%ghost %attr(0755,-,-) %dir %{_sharedstatedir}/glusterd/geo-replication
+%ghost %attr(0644,-,-) %{_sharedstatedir}/glusterd/geo-replication/gsyncd.conf
 %endif
 %endif
 
@@ -300,8 +307,10 @@ fi
 
 # Move legacy sysconf files to the correct sysconfdir
 if [ -d /etc/glusterd ]; then
-    cp -a /etc/glusterd /var/lib/
-    mv /etc/glusterd /etc/glusterd.rpmsave
+    mkdir -p /var/lib
+    cp -a /etc/glusterd /var/lib
+    rm -rf /etc/glusterd
+    ln -sf /var/lib/glusterd /etc/glusterd
 fi
 
 if [ -d /var/lib/glusterd/vols ]; then
@@ -320,11 +329,10 @@ if [ $? -eq 0 ]; then
 
     killall glusterd &> /dev/null
     #add marker translator
-    glusterd --xlator-option *.upgrade=on
+    glusterd --xlator-option *.upgrade=on -N
+    glusterd
 else
-    glusterd --xlator-option *.upgrade=on
-    sleep 10
-    killall glusterd &> /dev/null
+    glusterd --xlator-option *.upgrade=on -N
 fi
 
 %preun server
@@ -349,7 +357,6 @@ fi
 %defattr(-,root,root,-)
 #%doc examples/ doc/glusterfs*.vol.sample
 %config(noreplace) %{_sysconfdir}/glusterfs
-%{_sharedstatedir}/glusterd
 %{_sysconfdir}/init.d/glusterd
 %{_sbindir}/gluster
 %{_sbindir}/glusterd
@@ -358,6 +365,38 @@ fi
 %{_libdir}/glusterfs/%{version}/xlator/protocol/server*
 %{_libdir}/glusterfs/%{version}/xlator/mgmt*
 %{_libdir}/glusterfs/%{version}/xlator/nfs*
+%{_sharedstatedir}/glusterd/hook-scripts
+%ghost %attr(0644,-,-) %{_sharedstatedir}/glusterd/glusterd.info
+# This is really ugly, but I have no idea how to mark these directories in an
+# other way. They should belong to the glusterfs-server package, but don't
+# exist after installation. They are generated on the first start...
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/stop
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/stop/post
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/stop/pre
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start/post
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/start/pre
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/post
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/remove-brick/pre
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/post
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/add-brick/pre
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/set
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/set/post
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/set/pre
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/post
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/create/pre
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/post
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/hooks/1/delete/pre
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/glustershd
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/vols
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/nfs
+%ghost %dir %attr(0755,-,-) %{_sharedstatedir}/glusterd/peers
 
 %files devel
 %defattr(-,root,root,-)
@@ -366,6 +405,9 @@ fi
 %{_libdir}/*.so
 
 %changelog
+* Thu Jun 07 2012 Niels de Vos <ndevos@redhat.com>
+- Mark /var/lib/glusterd as owned by glusterfs, subdirs belong to -server
+
 * Wed May 9 2012 Kaleb S. KEITHLEY <kkeithle[at]redhat.com>
 - Add BuildRequires: libxml2-devel so that configure will DTRT on for
 - Fedora's Koji build system

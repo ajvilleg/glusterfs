@@ -80,7 +80,7 @@ dht_filter_loc_subvol_key (xlator_t *this, loc_t *loc, loc_t *new_loc,
         int            ret       = 0; /* not found */
 
         /* Why do other tasks if first required 'char' itself is not there */
-        if (!loc->name || !strchr (loc->name, '@'))
+        if (!new_loc || !loc || !loc->name || !strchr (loc->name, '@'))
                 goto out;
 
         trav = this->children;
@@ -773,11 +773,8 @@ int
 dht_rebalance_complete_check (xlator_t *this, call_frame_t *frame)
 {
         int         ret     = -1;
-        dht_conf_t *conf    = NULL;
 
-        conf = this->private;
-
-        ret = synctask_new (conf->env, dht_migration_complete_check_task,
+        ret = synctask_new (this->ctx->env, dht_migration_complete_check_task,
                             dht_migration_complete_check_done,
                             frame, frame);
         return ret;
@@ -906,11 +903,8 @@ dht_rebalance_in_progress_check (xlator_t *this, call_frame_t *frame)
 {
 
         int         ret     = -1;
-        dht_conf_t *conf    = NULL;
 
-        conf = this->private;
-
-        ret = synctask_new (conf->env, dht_rebalance_inprogress_task,
+        ret = synctask_new (this->ctx->env, dht_rebalance_inprogress_task,
                             dht_inprogress_check_done,
                             frame, frame);
         return ret;
