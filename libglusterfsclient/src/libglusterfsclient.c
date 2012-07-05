@@ -110,7 +110,6 @@ zr_build_process_uuid ()
 	char           tmp_str[1024] = {0,};
 	char           hostname[256] = {0,};
 	struct timeval tv = {0,};
-	struct tm      now = {0, };
 	char           now_str[32];
 
 	if (-1 == gettimeofday(&tv, NULL)) {
@@ -125,9 +124,8 @@ zr_build_process_uuid ()
 			strerror (errno));
 	}
 
-	localtime_r (&tv.tv_sec, &now);
-	strftime (now_str, 32, "%Y/%m/%d-%H:%M:%S", &now);
-	snprintf (tmp_str, 1024, "%s-%d-%s:%ld", 
+        gf_time_fmt (now_str, sizeof now_str, tv.tv_sec, gf_timefmt_Ymd_T);
+	snprintf (tmp_str, sizeof tmp_str, "%s-%d-%s:%ld", 
 		  hostname, getpid(), now_str, tv.tv_usec);
 	
 	return strdup (tmp_str);
@@ -216,6 +214,7 @@ libgf_alloc_fd_ctx (libglusterfs_client_ctx_t *ctx, fd_t *fd, char *vpath)
 
         if (vpath != NULL) {
                 strcpy (fdctx->vpath, vpath);
+                assert (strlen(vpath) > 0);
                 if (vpath[strlen(vpath) - 1] != '/') {
                         strcat (fdctx->vpath, "/");
                 }
@@ -745,7 +744,7 @@ xlator_graph_fini (xlator_t *xl)
 char *
 libgf_rrindex (char *str, int c, int n)
 {
-        int     len = 0;
+        size_t  len;
         int     occurrence = 0;
 
         if (str == NULL)
@@ -753,7 +752,8 @@ libgf_rrindex (char *str, int c, int n)
 
         len = strlen (str);
         /* Point to last character of string. */
-        str += (len - 1);
+        if (len)
+                str += (len - 1);
         while (len > 0) {
                 if ((int)*str == c) {
                         ++occurrence;
@@ -780,7 +780,7 @@ libgf_trim_to_prev_dir (char * path)
          * then there is no prev dir.
          */
         len = strlen (path);
-        if (len == 1)
+        if (len <= 1)
                 return path;
 
         if (path[len - 1] == '/') {
@@ -1443,7 +1443,7 @@ struct vmp_entry *
 libgf_init_vmpentry (char *vmp, glusterfs_handle_t *vmphandle)
 {
         struct vmp_entry        *entry = NULL;
-        int                     vmplen = 0;
+        size_t                  vmplen = 0;
         int                     appendslash = 0;
         int                     ret = -1;
 
@@ -1454,6 +1454,7 @@ libgf_init_vmpentry (char *vmp, glusterfs_handle_t *vmphandle)
         }
 
         vmplen = strlen (vmp);
+        assert (vmplen > 0);
         if (vmp[vmplen - 1] != '/') {
                 vmplen++;
                 appendslash = 1;
@@ -1504,7 +1505,7 @@ libgf_count_path_components (char *path)
         char    *pathdup = NULL;
         int     len = 0;
 
-        if (!path)
+        if (!path || !*path)
                 return -1;
 
         pathdup = strdup (path);
@@ -7805,7 +7806,7 @@ libgf_client_chdir (const char *path)
         {
                 if (!libgf_path_absolute (path)) {
                         resulting_cwd_len = strlen (path) + strlen (cwd)
-                                + ((path[strlen (path) - 1] == '/')
+                                + ((strlen (path) && path[strlen (path) - 1] == '/')
                                    ? 0 : 1) + 1;
 
                         if (resulting_cwd_len > PATH_MAX) {

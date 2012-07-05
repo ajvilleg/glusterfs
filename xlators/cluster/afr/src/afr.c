@@ -107,6 +107,7 @@ reconfigure (xlator_t *this, dict_t *options)
 {
         afr_private_t *priv        = NULL;
         xlator_t      *read_subvol = NULL;
+        int            read_subvol_index = -1;
         int            ret         = -1;
         int            index       = -1;
         char          *qtype       = NULL;
@@ -149,11 +150,26 @@ reconfigure (xlator_t *this, dict_t *options)
 
         GF_OPTION_RECONF ("read-subvolume", read_subvol, options, xlator, out);
 
+        GF_OPTION_RECONF ("read-hash-mode", priv->hash_mode,
+                          options, uint32, out);
+
         if (read_subvol) {
                 index = xlator_subvolume_index (this, read_subvol);
                 if (index == -1) {
                         gf_log (this->name, GF_LOG_ERROR, "%s not a subvolume",
                                 read_subvol->name);
+                        goto out;
+                }
+                priv->read_child = index;
+        }
+
+        GF_OPTION_RECONF ("read-subvolume-index",read_subvol_index, options,int32,out);
+
+        if (read_subvol_index >-1) {
+                index=read_subvol_index;
+                if (index >= priv->child_count) {
+                        gf_log (this->name, GF_LOG_ERROR, "%d not a subvolume-index",
+                                index);
                         goto out;
                 }
                 priv->read_child = index;
@@ -167,11 +183,11 @@ reconfigure (xlator_t *this, dict_t *options)
         GF_OPTION_RECONF ("heal-timeout", priv->shd.timeout, options,
                           int32, out);
 
-        GF_OPTION_RECONF ("fast-path", priv->fast_path, options, bool, out);
-        if (priv->fast_path) {
-                /* Fast path doesn't work without eager locking. */
-                priv->eager_lock = _gf_true;
-        }
+	GF_OPTION_RECONF ("post-op-delay-secs", priv->post_op_delay_secs, options,
+			  uint32, out);
+
+        /* Reset this so we re-discover in case the topology changed.  */
+        priv->did_discovery = _gf_false;
 
         ret = 0;
 out:
@@ -199,6 +215,7 @@ init (xlator_t *this)
         int            ret         = -1;
         GF_UNUSED int  op_errno    = 0;
         xlator_t      *read_subvol = NULL;
+        int            read_subvol_index = -1;
         xlator_t      *fav_child   = NULL;
         char          *qtype       = NULL;
 
@@ -230,7 +247,6 @@ init (xlator_t *this)
 
         priv->child_count = child_count;
 
-
         priv->read_child = -1;
 
         GF_OPTION_INIT ("read-subvolume", read_subvol, xlator, out);
@@ -242,6 +258,18 @@ init (xlator_t *this)
                         goto out;
                 }
         }
+        GF_OPTION_INIT ("read-subvolume-index",read_subvol_index,int32,out);
+        if (read_subvol_index > -1) {
+                if (read_subvol_index >= priv->child_count) {
+                        gf_log (this->name, GF_LOG_ERROR, "%d not a subvolume-index",
+                                read_subvol_index);
+                        goto out;
+                }
+                priv->read_child = read_subvol_index;
+        }
+        GF_OPTION_INIT ("choose-local", priv->choose_local, bool, out);
+
+        GF_OPTION_INIT ("read-hash-mode", priv->hash_mode, uint32, out);
 
         priv->favorite_child = -1;
         GF_OPTION_INIT ("favorite-child", fav_child, xlator, out);
@@ -299,11 +327,7 @@ init (xlator_t *this)
         GF_OPTION_INIT ("quorum-count", priv->quorum_count, uint32, out);
         fix_quorum_options(this,priv,qtype);
 
-        GF_OPTION_INIT ("fast-path", priv->fast_path, bool, out);
-        if (priv->fast_path) {
-                /* Fast path doesn't work without eager locking. */
-                priv->eager_lock = _gf_true;
-        }
+	GF_OPTION_INIT ("post-op-delay-secs", priv->post_op_delay_secs, uint32, out);
 
         priv->wait_count = 1;
 
@@ -506,6 +530,25 @@ struct volume_options options[] = {
         { .key  = {"read-subvolume" },
           .type = GF_OPTION_TYPE_XLATOR
         },
+        { .key  = {"read-subvolume-index" },
+          .type = GF_OPTION_TYPE_INT,
+          .default_value = "-1",
+        },
+        { .key = {"read-hash-mode" },
+          .type = GF_OPTION_TYPE_INT,
+          .min = 0,
+          .max = 2,
+          .default_value = "0",
+          .description = "0 = first responder, "
+                         "1 = hash by GFID (all clients use same subvolume), "
+                         "2 = hash by GFID and client PID",
+        },
+        { .key  = {"choose-local" },
+          .type = GF_OPTION_TYPE_BOOL,
+          .default_value = "true",
+          .description = "Choose a local subvolume to read from if "
+                         "read-subvolume is not explicitly set.",
+        },
         { .key  = {"favorite-child"},
           .type = GF_OPTION_TYPE_XLATOR
         },
@@ -513,6 +556,7 @@ struct volume_options options[] = {
           .type = GF_OPTION_TYPE_INT,
           .min  = 0,
           .default_value = "16",
+          .validate = GF_OPT_VALIDATE_MIN,
         },
         { .key  = {"data-self-heal"},
           .type = GF_OPTION_TYPE_STR,
@@ -578,7 +622,7 @@ struct volume_options options[] = {
         },
         { .key = {"eager-lock"},
           .type = GF_OPTION_TYPE_BOOL,
-          .default_value = "off",
+          .default_value = "on",
         },
         { .key = {"self-heal-daemon"},
           .type = GF_OPTION_TYPE_BOOL,
@@ -622,6 +666,15 @@ struct volume_options options[] = {
           .max  = INT_MAX,
           .default_value = "600",
           .description = "Poll timeout for checking the need to self-heal"
+        },
+        { .key  = {"post-op-delay-secs"},
+          .type = GF_OPTION_TYPE_INT,
+          .min  = 0,
+          .max  = INT_MAX,
+          .default_value = "1",
+          .description = "Time interval induced artificially before "
+	                 "post-operation phase of the transaction to "
+                         "enhance overlap of adjacent write operations.",
         },
         { .key  = {NULL} },
 };

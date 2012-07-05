@@ -373,6 +373,9 @@ afr_sh_data_erase_pending_cbk (call_frame_t *frame, void *cookie,
 
         if (call_count == 0) {
                 if (sh->op_failed) {
+                        if (sh->old_loop_frame)
+                                sh_loop_finish (sh->old_loop_frame, this);
+                        sh->old_loop_frame = NULL;
                         afr_sh_data_fail (frame, this);
                         goto out;
                 }
@@ -752,6 +755,7 @@ afr_sh_data_fxattrop_fstat_done (call_frame_t *frame, xlator_t *this)
                         "No self-heal needed for %s",
                         local->loc.path);
 
+                local->govinda_gOvinda = 0;
                 afr_sh_data_finish (frame, this);
                 return 0;
         }
@@ -783,6 +787,7 @@ afr_sh_data_fxattrop_fstat_done (call_frame_t *frame, xlator_t *this)
                 return 0;
         }
 
+        local->govinda_gOvinda = 0;
         ret = afr_sh_inode_set_read_ctx (sh, this);
         if (ret) {
                 gf_log (this->name, GF_LOG_DEBUG,
@@ -803,7 +808,8 @@ afr_sh_data_fxattrop_fstat_done (call_frame_t *frame, xlator_t *this)
 int
 afr_lookup_select_read_child_by_txn_type (xlator_t *this, afr_local_t *local,
                                           dict_t **xattr,
-                                          afr_transaction_type txn_type)
+                                          afr_transaction_type txn_type,
+                                          uuid_t gfid)
 {
         afr_private_t            *priv      = NULL;
         int                      read_child = -1;
@@ -862,7 +868,8 @@ afr_lookup_select_read_child_by_txn_type (xlator_t *this, afr_local_t *local,
                                                         priv->child_count,
                                                         prev_read_child,
                                                         config_read_child,
-                                                        sources);
+                                                        sources,
+                                                        priv->hash_mode, gfid);
 out:
         afr_matrix_cleanup (pending_matrix, priv->child_count);
         gf_log (this->name, GF_LOG_DEBUG, "returning read_child: %d",
@@ -1397,6 +1404,8 @@ afr_self_heal_data (call_frame_t *frame, xlator_t *this)
 
         local = frame->local;
         sh = &local->self_heal;
+
+        local->govinda_gOvinda = afr_is_split_brain (this, sh->inode);
 
         if (sh->do_data_self_heal &&
             afr_data_self_heal_enabled (priv->data_self_heal)) {

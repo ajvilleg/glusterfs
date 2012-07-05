@@ -179,12 +179,14 @@ client3_1_symlink_cbk (struct rpc_req *req, struct iovec *iov, int count,
 
 out:
         if (rsp.op_ret == -1) {
+                /* no need to print the gfid, because it will be null, since
+                 * symlink operation failed.
+                 */
                 gf_log (this->name, GF_LOG_WARNING,
-                        "remote operation failed: %s. Path: %s (%s)",
+                        "remote operation failed: %s. Path: (%s to %s)",
                         strerror (gf_error_to_errno (rsp.op_errno)),
                         (local) ? local->loc.path : "--",
-                        (local && local->loc.inode) ?
-                        uuid_utoa (local->loc.inode->gfid) : "--");
+                        (local) ? local->loc2.path: "--");
         }
 
         CLIENT_STACK_UNWIND (symlink, frame, rsp.op_ret,
@@ -341,12 +343,83 @@ out:
 }
 
 int
+_copy_gfid_from_inode_holders (uuid_t gfid, loc_t *loc, fd_t *fd)
+{
+        int     ret = 0;
+
+        if (fd && fd->inode && !uuid_is_null (fd->inode->gfid)) {
+                uuid_copy (gfid, fd->inode->gfid);
+                goto out;
+        }
+
+        if (!loc) {
+                GF_ASSERT (0);
+                ret = -1;
+                goto out;
+        }
+
+        if (loc->inode && !uuid_is_null (loc->inode->gfid)) {
+                uuid_copy (gfid, loc->inode->gfid);
+        } else if (!uuid_is_null (loc->gfid)) {
+                uuid_copy (gfid, loc->gfid);
+        } else {
+                GF_ASSERT (0);
+                ret = -1;
+        }
+out:
+        return ret;
+}
+
+int
+client_add_fd_to_saved_fds (xlator_t *this, fd_t *fd, loc_t *loc, int32_t flags,
+                            int64_t remote_fd, int is_dir)
+{
+        int             ret = 0;
+        uuid_t          gfid = {0};
+        clnt_conf_t     *conf       = NULL;
+        clnt_fd_ctx_t   *fdctx      = NULL;
+
+        conf  = this->private;
+        ret = _copy_gfid_from_inode_holders (gfid, loc, fd);
+        if (ret) {
+                ret = -EINVAL;
+                goto out;
+        }
+
+        fdctx = GF_CALLOC (1, sizeof (*fdctx),
+                           gf_client_mt_clnt_fdctx_t);
+        if (!fdctx) {
+                ret = -ENOMEM;
+                goto out;
+        }
+
+        uuid_copy (fdctx->gfid, gfid);
+        fdctx->is_dir        = is_dir;
+        fdctx->remote_fd     = remote_fd;
+        fdctx->flags         = flags;
+        fdctx->lk_ctx        = fd_lk_ctx_ref (fd->lk_ctx);
+        fdctx->lk_heal_state = GF_LK_HEAL_DONE;
+
+        INIT_LIST_HEAD (&fdctx->sfd_pos);
+        INIT_LIST_HEAD (&fdctx->lock_list);
+
+        this_fd_set_ctx (fd, this, loc, fdctx);
+
+        pthread_mutex_lock (&conf->lock);
+        {
+                list_add_tail (&fdctx->sfd_pos, &conf->saved_fds);
+        }
+        pthread_mutex_unlock (&conf->lock);
+out:
+        return ret;
+}
+
+int
 client3_1_open_cbk (struct rpc_req *req, struct iovec *iov, int count,
                     void *myframe)
 {
         clnt_local_t  *local = NULL;
         clnt_conf_t   *conf  = NULL;
-        clnt_fd_ctx_t *fdctx = NULL;
         call_frame_t  *frame = NULL;
         fd_t          *fd    = NULL;
         int            ret   = 0;
@@ -377,31 +450,13 @@ client3_1_open_cbk (struct rpc_req *req, struct iovec *iov, int count,
         }
 
         if (-1 != rsp.op_ret) {
-                fdctx = GF_CALLOC (1, sizeof (*fdctx),
-                                   gf_client_mt_clnt_fdctx_t);
-                if (!fdctx) {
+                ret = client_add_fd_to_saved_fds (frame->this, fd, &local->loc,
+                                                  local->flags, rsp.fd, 0);
+                if (ret) {
                         rsp.op_ret = -1;
-                        rsp.op_errno = ENOMEM;
+                        rsp.op_errno = -ret;
                         goto out;
                 }
-
-                fdctx->remote_fd     = rsp.fd;
-                fdctx->inode         = inode_ref (fd->inode);
-                fdctx->flags         = local->flags;
-                fdctx->wbflags       = local->wbflags;
-                fdctx->lk_ctx        = fd_lk_ctx_ref (fd->lk_ctx);
-                fdctx->lk_heal_state = GF_LK_HEAL_DONE;
-
-                INIT_LIST_HEAD (&fdctx->sfd_pos);
-                INIT_LIST_HEAD (&fdctx->lock_list);
-
-                this_fd_set_ctx (fd, frame->this, &local->loc, fdctx);
-
-                pthread_mutex_lock (&conf->lock);
-                {
-                        list_add_tail (&fdctx->sfd_pos, &conf->saved_fds);
-                }
-                pthread_mutex_unlock (&conf->lock);
         }
 
         GF_PROTOCOL_DICT_UNSERIALIZE (this, xdata, (rsp.xdata.xdata_val),
@@ -1056,7 +1111,7 @@ out:
          * changes went in.
          */
         if (rsp.op_ret == -1) {
-                gf_log (this->name, ((op_errno == ENOTSUP) ?
+                gf_log (this->name, (((op_errno == ENOTSUP) || (op_errno == ENODATA)) ?
                                      GF_LOG_DEBUG : GF_LOG_WARNING),
                         "remote operation failed: %s. Path: %s (%s). Key: %s",
                         strerror (op_errno),
@@ -1986,8 +2041,6 @@ client3_1_create_cbk (struct rpc_req *req, struct iovec *iov, int count,
         struct iatt      postparent = {0, };
         int32_t          ret        = -1;
         clnt_local_t    *local      = NULL;
-        clnt_conf_t     *conf       = NULL;
-        clnt_fd_ctx_t   *fdctx      = NULL;
         gfs3_create_rsp  rsp        = {0,};
         xlator_t *this       = NULL;
         dict_t  *xdata       = NULL;
@@ -1996,7 +2049,6 @@ client3_1_create_cbk (struct rpc_req *req, struct iovec *iov, int count,
 
         frame = myframe;
         local = frame->local;
-        conf  = frame->this->private;
         fd    = local->fd;
         inode = local->loc.inode;
 
@@ -2019,31 +2071,14 @@ client3_1_create_cbk (struct rpc_req *req, struct iovec *iov, int count,
 
                 gf_stat_to_iatt (&rsp.preparent, &preparent);
                 gf_stat_to_iatt (&rsp.postparent, &postparent);
-
-                fdctx = GF_CALLOC (1, sizeof (*fdctx),
-                                   gf_client_mt_clnt_fdctx_t);
-                if (!fdctx) {
+                uuid_copy (local->loc.gfid, stbuf.ia_gfid);
+                ret = client_add_fd_to_saved_fds (frame->this, fd, &local->loc,
+                                                  local->flags, rsp.fd, 0);
+                if (ret) {
                         rsp.op_ret = -1;
-                        rsp.op_errno = ENOMEM;
+                        rsp.op_errno = -ret;
                         goto out;
                 }
-
-                fdctx->remote_fd     = rsp.fd;
-                fdctx->inode         = inode_ref (inode);
-                fdctx->flags         = local->flags;
-                fdctx->lk_ctx        = fd_lk_ctx_ref (fd->lk_ctx);
-                fdctx->lk_heal_state = GF_LK_HEAL_DONE;
-
-                INIT_LIST_HEAD (&fdctx->sfd_pos);
-                INIT_LIST_HEAD (&fdctx->lock_list);
-
-                this_fd_set_ctx (fd, frame->this, &local->loc, fdctx);
-
-                pthread_mutex_lock (&conf->lock);
-                {
-                        list_add_tail (&fdctx->sfd_pos, &conf->saved_fds);
-                }
-                pthread_mutex_unlock (&conf->lock);
         }
 
         GF_PROTOCOL_DICT_UNSERIALIZE (this, xdata, (rsp.xdata.xdata_val),
@@ -2485,9 +2520,8 @@ client3_1_opendir_cbk (struct rpc_req *req, struct iovec *iov, int count,
 {
         clnt_local_t      *local = NULL;
         clnt_conf_t       *conf = NULL;
-        clnt_fd_ctx_t     *fdctx = NULL;
-        call_frame_t   *frame = NULL;
-        fd_t             *fd = NULL;
+        call_frame_t      *frame = NULL;
+        fd_t              *fd = NULL;
         int ret = 0;
         gfs3_opendir_rsp  rsp = {0,};
         xlator_t *this       = NULL;
@@ -2516,28 +2550,13 @@ client3_1_opendir_cbk (struct rpc_req *req, struct iovec *iov, int count,
         }
 
         if (-1 != rsp.op_ret) {
-                fdctx = GF_CALLOC (1, sizeof (*fdctx),
-                                   gf_client_mt_clnt_fdctx_t);
-                if (!fdctx) {
+                ret = client_add_fd_to_saved_fds (frame->this, fd, &local->loc,
+                                                  0, rsp.fd, 1);
+                if (ret) {
                         rsp.op_ret = -1;
-                        rsp.op_errno = ENOMEM;
+                        rsp.op_errno = -ret;
                         goto out;
                 }
-
-                fdctx->remote_fd = rsp.fd;
-                fdctx->inode     = inode_ref (fd->inode);
-                fdctx->is_dir    = 1;
-
-                INIT_LIST_HEAD (&fdctx->sfd_pos);
-                INIT_LIST_HEAD (&fdctx->lock_list);
-
-                this_fd_set_ctx (fd, frame->this, &local->loc, fdctx);
-
-                pthread_mutex_lock (&conf->lock);
-                {
-                        list_add_tail (&fdctx->sfd_pos, &conf->saved_fds);
-                }
-                pthread_mutex_unlock (&conf->lock);
         }
 
         GF_PROTOCOL_DICT_UNSERIALIZE (this, xdata, (rsp.xdata.xdata_val),
@@ -2811,7 +2830,6 @@ client_fdctx_destroy (xlator_t *this, clnt_fd_ctx_t *fdctx)
 out:
         if (fdctx) {
                 fdctx->remote_fd = -1;
-                inode_unref (fdctx->inode);
                 GF_FREE (fdctx);
         }
 
@@ -3244,11 +3262,17 @@ int32_t
 client3_1_readlink (call_frame_t *frame, xlator_t *this,
                     void *data)
 {
-        clnt_conf_t       *conf     = NULL;
-        clnt_args_t       *args     = NULL;
-        gfs3_readlink_req  req      = {{0,},};
-        int                ret      = 0;
-        int                op_errno = ESTALE;
+        clnt_conf_t       *conf              = NULL;
+        clnt_args_t       *args              = NULL;
+        gfs3_readlink_req  req               = {{0,},};
+        int                ret               = 0;
+        int                op_errno          = ESTALE;
+        clnt_local_t      *local             = NULL;
+        struct iobuf      *rsp_iobuf         = NULL;
+        struct iobref     *rsp_iobref        = NULL;
+        struct iovec      *rsphdr            = NULL;
+        int                count             = 0;
+        struct iovec       vector[MAX_IOVEC] = {{0}, };
 
         if (!frame || !this || !data)
                 goto unwind;
@@ -3270,14 +3294,43 @@ client3_1_readlink (call_frame_t *frame, xlator_t *this,
         req.size = args->size;
         conf = this->private;
 
+        local = mem_get0 (this->local_pool);
+        if (!local) {
+                op_errno = ENOMEM;
+                goto unwind;
+        }
+
+        frame->local = local;
+
         GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
                                     req.xdata.xdata_len, op_errno, unwind);
+
+        rsp_iobref = iobref_new ();
+        if (rsp_iobref == NULL) {
+                goto unwind;
+        }
+
+        rsp_iobuf = iobuf_get (this->ctx->iobuf_pool);
+        if (rsp_iobuf == NULL) {
+                goto unwind;
+        }
+
+        iobref_add (rsp_iobref, rsp_iobuf);
+        iobuf_unref (rsp_iobuf);
+        rsphdr = &vector[0];
+        rsphdr->iov_base = iobuf_ptr (rsp_iobuf);
+        rsphdr->iov_len = iobuf_pagesize (rsp_iobuf);
+        count = 1;
+        local->iobref = rsp_iobref;
+        rsp_iobuf = NULL;
+        rsp_iobref = NULL;
 
         ret = client_submit_request (this, &req, frame, conf->fops,
                                      GFS3_OP_READLINK,
                                      client3_1_readlink_cbk, NULL,
-                                     NULL, 0, NULL, 0,
-                                     NULL, (xdrproc_t)xdr_gfs3_readlink_req);
+                                     rsphdr, count, NULL, 0,
+                                     local->iobref,
+                                     (xdrproc_t)xdr_gfs3_readlink_req);
         if (ret) {
                 gf_log (this->name, GF_LOG_WARNING, "failed to send the fop");
         }
@@ -3287,6 +3340,10 @@ client3_1_readlink (call_frame_t *frame, xlator_t *this,
 
         return 0;
 unwind:
+        if (rsp_iobref != NULL) {
+                iobref_unref (rsp_iobref);
+        }
+
         CLIENT_STACK_UNWIND (readlink, frame, -1, op_errno, NULL, NULL, NULL);
         if (req.xdata.xdata_val)
                 GF_FREE (req.xdata.xdata_val);
@@ -3445,6 +3502,7 @@ client3_1_symlink (call_frame_t *frame, xlator_t *this,
         req.linkname = (char *)args->linkname;
         req.bname    = (char *)args->loc->name;
         req.umask = args->umask;
+        local->loc2.path = gf_strdup (req.linkname);
 
         conf = this->private;
 
@@ -4023,9 +4081,6 @@ client3_1_writev (call_frame_t *frame, xlator_t *this, void *data)
 
         memcpy (req.gfid, args->fd->inode->gfid, 16);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
-                                    req.xdata.xdata_len, op_errno, unwind);
-
 #ifdef GF_TESTING_IO_XDATA
         if (!args->xdata)
                 args->xdata = dict_new ();
@@ -4150,6 +4205,8 @@ client3_1_fsync (call_frame_t *frame, xlator_t *this,
         req.data = args->flags;
         memcpy (req.gfid, args->fd->inode->gfid, 16);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
+                                    req.xdata.xdata_len, op_errno, unwind);
 
         ret = client_submit_request (this, &req, frame, conf->fops,
                                      GFS3_OP_FSYNC, client3_1_fsync_cbk, NULL,
@@ -4261,6 +4318,9 @@ client3_1_opendir (call_frame_t *frame, xlator_t *this,
                                        unwind, op_errno, EINVAL);
 
         conf = this->private;
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
+                                    req.xdata.xdata_len, op_errno, unwind);
 
         ret = client_submit_request (this, &req, frame, conf->fops,
                                      GFS3_OP_OPENDIR, client3_1_opendir_cbk,
@@ -4653,7 +4713,7 @@ client3_1_getxattr (call_frame_t *frame, xlator_t *this,
         }
         args = data;
 
-        if (!(args->loc && args->loc->inode)) {
+        if (!args->loc) {
                 op_errno = EINVAL;
                 goto unwind;
         }
@@ -4694,7 +4754,7 @@ client3_1_getxattr (call_frame_t *frame, xlator_t *this,
         rsp_iobuf = NULL;
         rsp_iobref = NULL;
 
-        if (!uuid_is_null (args->loc->inode->gfid))
+        if (args->loc->inode && !uuid_is_null (args->loc->inode->gfid))
                 memcpy (req.gfid,  args->loc->inode->gfid, 16);
         else
                 memcpy (req.gfid, args->loc->gfid, 16);
@@ -5166,6 +5226,9 @@ client3_1_lk (call_frame_t *frame, xlator_t *this,
         gf_proto_flock_from_flock (&req.flock, args->flock);
 
         memcpy (req.gfid, args->fd->inode->gfid, 16);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
+                                    req.xdata.xdata_len, op_errno, unwind);
 
         ret = client_submit_request (this, &req, frame, conf->fops, GFS3_OP_LK,
                                      client3_1_lk_cbk, NULL,
@@ -5815,6 +5878,9 @@ client3_1_fsetattr (call_frame_t *frame, xlator_t *this, void *data)
         req.fd = remote_fd;
         req.valid = args->valid;
         gf_stat_from_iatt (&req.stbuf, args->stbuf);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, args->xdata, (&req.xdata.xdata_val),
+                                    req.xdata.xdata_len, op_errno, unwind);
 
         ret = client_submit_request (this, &req, frame, conf->fops,
                                      GFS3_OP_FSETATTR,

@@ -59,17 +59,14 @@ struct dnscache6 {
 
 
 /* works similar to mkdir(1) -p.
- * @start returns the point in path from which components were created
- * @start is -1 if the entire path existed before.
  */
 int
-mkdir_p (char *path, mode_t mode, gf_boolean_t allow_symlinks, int *start)
+mkdir_p (char *path, mode_t mode, gf_boolean_t allow_symlinks)
 {
         int             i               = 0;
         int             ret             = -1;
         char            dir[PATH_MAX]   = {0,};
         struct stat     stbuf           = {0,};
-        int             created         = -1;
 
         strcpy (dir, path);
         i = (dir[0] == '/')? 1: 0;
@@ -84,9 +81,6 @@ mkdir_p (char *path, mode_t mode, gf_boolean_t allow_symlinks, int *start)
                                 strerror (errno));
                         goto out;
                 }
-
-                if (ret && errno == EEXIST)
-                        created = i;
 
                 if (ret && errno == EEXIST && !allow_symlinks) {
                         ret = lstat (dir, &stbuf);
@@ -113,8 +107,6 @@ mkdir_p (char *path, mode_t mode, gf_boolean_t allow_symlinks, int *start)
         }
 
         ret = 0;
-        if (start)
-                *start = created;
 out:
 
         return ret;
@@ -404,10 +396,8 @@ void
 gf_print_trace (int32_t signum)
 {
         extern FILE *gf_log_logfile;
-        struct tm   *tm = NULL;
         char         msg[1024] = {0,};
-        char         timestr[256] = {0,};
-        time_t       utime = 0;
+        char         timestr[64] = {0,};
         int          ret = 0;
         int          fd = 0;
 
@@ -456,9 +446,7 @@ gf_print_trace (int32_t signum)
         {
                 /* Dump the timestamp of the crash too, so the previous logs
                    can be related */
-                utime = time (NULL);
-                tm    = localtime (&utime);
-                strftime (timestr, 256, "%Y-%m-%d %H:%M:%S\n", tm);
+                gf_time_fmt (timestr, sizeof timestr, time (NULL), gf_timefmt_FT);
                 ret = write (fd, "time of crash: ", 15);
                 if (ret < 0)
                         goto out;
@@ -1652,7 +1640,7 @@ valid_host_name (char *address, int length)
         char            *temp_str = NULL;
         char            *save_ptr = NULL;
 
-        if ((length > _POSIX_HOST_NAME_MAX) || (length == 1)) {
+        if ((length > _POSIX_HOST_NAME_MAX) || (length < 1)) {
                 ret = 0;
                 goto out;
         }
@@ -1715,7 +1703,8 @@ valid_ipv4_address (char *address, int length, gf_boolean_t wildcard_acc)
         tmp = gf_strdup (address);
 
         /* To prevent cases where last character is '.' */
-        if (!isdigit (tmp[length - 1]) && (tmp[length - 1] != '*')) {
+        if (length <= 0 ||
+            (!isdigit (tmp[length - 1]) && (tmp[length - 1] != '*'))) {
                 ret = 0;
                 goto out;
         }
@@ -1761,7 +1750,7 @@ valid_ipv6_address (char *address, int length, gf_boolean_t wildcard_acc)
         tmp = gf_strdup (address);
 
         /* Check for compressed form */
-        if (tmp[length - 1] == ':') {
+        if (length <= 0 || tmp[length - 1] == ':') {
                 ret = 0;
                 goto out;
         }
@@ -1961,11 +1950,6 @@ out:
  * power of two is returned.
  */
 
-/*
- * rounds up nr to next power of two. If nr is already a power of two, next
- * power of two is returned.
- */
-
 inline int32_t
 gf_roundup_next_power_of_two (uint32_t nr)
 {
@@ -2100,3 +2084,73 @@ gf_strip_whitespace (char *str, int len)
         GF_FREE (new_str);
         return new_len;
 }
+
+/* If the path exists use realpath(3) to handle extra slashes and to resolve
+ * symlinks else strip the extra slashes in the path and return */
+
+int
+gf_canonicalize_path (char *path)
+{
+        int             ret                  = -1;
+        int             path_len             = 0;
+        int             dir_path_len         = 0;
+        char           *tmppath              = NULL;
+        char           *dir                  = NULL;
+        char           *tmpstr               = NULL;
+
+        if (!path || *path != '/')
+                goto out;
+
+        tmppath = gf_strdup (path);
+        if (!tmppath)
+                goto out;
+
+        /* Strip the extra slashes and return */
+        bzero (path, strlen(path));
+        path[0] = '/';
+        dir = strtok_r(tmppath, "/", &tmpstr);
+
+        while (dir) {
+                dir_path_len = strlen(dir);
+                strncpy ((path + path_len + 1), dir, dir_path_len);
+                path_len += dir_path_len + 1;
+                dir = strtok_r (NULL, "/", &tmpstr);
+                if (dir)
+                        strncpy ((path + path_len), "/", 1);
+        }
+        path[path_len] = '\0';
+        ret = 0;
+
+ out:
+        if (ret)
+                gf_log ("common-utils", GF_LOG_ERROR,
+                        "Path manipulation failed");
+
+        if (tmppath)
+                GF_FREE(tmppath);
+
+        return ret;
+}
+
+static const char *__gf_timefmts[] = {
+        "%F %T",
+        "%Y/%m/%d-%T",
+        "%b %d %T",
+        "%F %H%M%S"
+};
+
+static const char *__gf_zerotimes[] = {
+        "0000-00-00 00:00:00",
+        "0000/00/00-00:00:00",
+        "xxx 00 00:00:00",
+        "0000-00-00 000000"
+};
+
+void
+_gf_timestuff (gf_timefmts *fmt, const char ***fmts, const char ***zeros)
+{
+        *fmt = gf_timefmt_last;
+        *fmts = __gf_timefmts;
+        *zeros = __gf_zerotimes;
+}
+

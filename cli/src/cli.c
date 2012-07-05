@@ -108,7 +108,6 @@ generate_uuid ()
         char           tmp_str[1024] = {0,};
         char           hostname[256] = {0,};
         struct timeval tv = {0,};
-        struct tm      now = {0, };
         char           now_str[32];
 
         if (gettimeofday (&tv, NULL) == -1) {
@@ -123,9 +122,8 @@ generate_uuid ()
                         strerror (errno));
         }
 
-        localtime_r (&tv.tv_sec, &now);
-        strftime (now_str, 32, "%Y/%m/%d-%H:%M:%S", &now);
-        snprintf (tmp_str, 1024, "%s-%d-%s:%"
+        gf_time_fmt (now_str, sizeof now_str, tv.tv_sec, gf_timefmt_Ymd_T);
+        snprintf (tmp_str, sizeof tmp_str, "%s-%d-%s:%"
 #ifdef GF_DARWIN_HOST_OS
                   PRId32,
 #else
@@ -528,7 +526,7 @@ cli_rpc_init (struct cli_state *state)
         if (ret)
                 goto out;
 
-        ret = dict_set_str (options, "transport.address-family", "inet/inet6");
+        ret = dict_set_str (options, "transport.address-family", "inet");
         if (ret)
                 goto out;
 
@@ -575,70 +573,6 @@ cli_local_wipe (cli_local_t *local)
         }
 
         return;
-}
-
-/* If the path exists use realpath(3) to handle extra slashes and to resolve
- * symlinks else strip the extra slashes in the path and return */
-
-int
-cli_canonicalize_path (char *path)
-{
-        struct stat     sb = {0};
-        int             ret = -1;
-        char            *tmppath = NULL;
-        char            *dir = NULL;
-        char            *tmpstr = NULL;
-        int             path_len = 0;
-
-        if (!path)
-                return ret;
-
-        ret = stat (path, &sb);
-        if (ret == -1) {
-                /* Strip the extra slashes and return */
-                tmppath = gf_strdup (path);
-                if (tmppath == NULL) {
-                        ret = -1;
-                        gf_log ("cli", GF_LOG_ERROR, "Out of memory.");
-                        goto out;
-                }
-                bzero (path, strlen(path));
-                path[0] = '/';
-                dir = strtok_r(tmppath, "/", &tmpstr);
-                while (dir) {
-                        strncpy ((path + path_len + 1), dir, strlen(dir));
-                        path_len = strlen (path);
-                        dir = strtok_r(NULL, "/", &tmpstr);
-                        if (dir)
-                                strncpy((path + path_len), "/", 1);
-                }
-                if (path_len == 0)
-                        path[1] = '\0';
-                else
-                        path[path_len] = '\0';
-                ret = 0;
-                goto out;
-        } else {
-                tmppath = gf_strdup(path);
-                if (tmppath == NULL) {
-                        ret = -1;
-                        gf_log ("cli", GF_LOG_ERROR, "Out of memory.");
-                        goto out;
-                }
-                if (realpath (tmppath, path) == NULL) {
-                        cli_out ("Path manipulation failed: %s",
-                                 strerror(errno));
-                        gf_log ("cli", GF_LOG_ERROR, "Path manipulation "
-                                 "failed: %s", strerror(errno));
-                        ret = -1;
-                        goto out;
-                }
-                ret = 0;
-        }
-out:
-        if (tmppath)
-                GF_FREE(tmppath);
-        return ret;
 }
 
 struct cli_state *global_state;

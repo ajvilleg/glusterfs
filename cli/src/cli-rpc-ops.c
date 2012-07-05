@@ -129,8 +129,8 @@ gf_cli3_1_probe_cbk (struct rpc_req *req, struct iovec *iov,
                                 break;
                         default:
                                 snprintf (msg, sizeof (msg),
-                                          "Probe returned with unknown errno %d",
-                                           rsp.op_errno);
+                                          "Probe returned with unknown errno"
+                                          " %d", rsp.op_errno);
                                 break;
                 }
          }
@@ -168,7 +168,12 @@ gf_cli3_1_probe_cbk (struct rpc_req *req, struct iovec *iov,
                                                   "information on %s" ,
                                                   rsp.hostname);
                                         break;
-
+                                case GF_PROBE_SAME_UUID:
+                                        snprintf (msg, sizeof (msg),
+                                                  "Peer uuid (host: %s) is"
+                                                  "same as local uuid",
+                                                  rsp.hostname);
+                                break;
                                 default:
                                         snprintf (msg, sizeof (msg),
                                                   "Probe unsuccessful\nProbe "
@@ -1040,6 +1045,7 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
         char                     key[256] = {0,};
         int32_t                  i = 1;
         uint64_t                 failures = 0;
+        double                   elapsed = 0;
 
         if (-1 == req->rpc_status) {
                 goto out;
@@ -1104,12 +1110,6 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
                 goto done;
         }
 
-        ret = dict_get_int32 (dict, "count", &counter);
-        if (ret) {
-                gf_log (THIS->name, GF_LOG_ERROR, "count not set");
-                goto out;
-        }
-
         if (cmd == GF_DEFRAG_CMD_STOP) {
                 if (rsp.op_ret == -1) {
                         if (strcmp (rsp.op_errstr, ""))
@@ -1138,11 +1138,18 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
                         goto done;
                 }
         }
-        cli_out ("%40s %16s %13s %13s %13s %14s", "Node", "Rebalanced-files",
-                 "size", "scanned", "failures","status");
-        cli_out ("%40s %16s %13s %13s %13s %14s", "---------", "-----------",
-                 "-----------", "-----------", "-----------", "------------");
 
+        ret = dict_get_int32 (dict, "count", &counter);
+        if (ret) {
+                gf_log (THIS->name, GF_LOG_ERROR, "count not set");
+                goto out;
+        }
+
+        cli_out ("%40s %16s %13s %13s %13s %14s %s", "Node", "Rebalanced-files",
+                 "size", "scanned", "failures", "status", "run time in secs");
+        cli_out ("%40s %16s %13s %13s %13s %14s %14s", "---------",
+                 "-----------", "-----------", "-----------", "-----------",
+                 "------------", "-----------");
         do {
                 snprintf (key, 256, "node-uuid-%d", i);
                 ret = dict_get_str (dict, key, &node_uuid);
@@ -1185,6 +1192,13 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
                         gf_log (THIS->name, GF_LOG_TRACE,
                                 "failed to get failures count");
 
+                memset (key, 0, 256);
+                snprintf (key, 256, "run-time-%d", i);
+                ret = dict_get_double (dict, key, &elapsed);
+                if (ret)
+                        gf_log (THIS->name, GF_LOG_TRACE,
+                                "failed to get run-time");
+
                 switch (status_rcd) {
                 case GF_DEFRAG_STATUS_NOT_STARTED:
                         status = "not started";
@@ -1202,9 +1216,9 @@ gf_cli3_1_defrag_volume_cbk (struct rpc_req *req, struct iovec *iov,
                         status = "failed";
                         break;
                 }
-                cli_out ("%40s %16"PRId64 "%13"PRId64 "%13"PRId64 "%13"PRId64
-                         " %14s", node_uuid, files, size, lookup, failures,
-                         status);
+                cli_out ("%40s %16"PRIu64 "%13"PRIu64 "%13"PRIu64 "%13"PRIu64
+                         " %14s %14.2f", node_uuid, files, size, lookup,
+                         failures, status, elapsed);
                 i++;
         } while (i <= counter);
 
@@ -1469,6 +1483,7 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
         char                    *node_uuid = 0;
         gf_defrag_status_t       status_rcd = GF_DEFRAG_STATUS_NOT_STARTED;
         uint64_t                 failures = 0;
+        double                   elapsed = 0;
 
 
         if (-1 == req->rpc_status) {
@@ -1514,10 +1529,11 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
         }
 
 
-        cli_out ("%40s %16s %13s %13s %13s %14s", "Node", "Rebalanced-files",
-                 "size", "scanned", "failures", "status");
-        cli_out ("%40s %16s %13s %13s %13s %14s", "---------", "-----------",
-                 "-----------", "-----------", "-----------", "------------");
+        cli_out ("%40s %16s %13s %13s %13s %14s %s", "Node", "Rebalanced-files",
+                 "size", "scanned", "failures", "status", "run-time in secs");
+        cli_out ("%40s %16s %13s %13s %13s %14s %14s", "---------",
+                 "-----------", "-----------", "-----------", "-----------",
+                 "------------", "------------");
 
         do {
                 snprintf (key, 256, "node-uuid-%d", i);
@@ -1560,6 +1576,13 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
                         gf_log (THIS->name, GF_LOG_TRACE,
                                 "Failed to get failure on files");
 
+                memset (key, 0, 256);
+                snprintf (key, 256, "run-time-%d", i);
+                ret = dict_get_double (dict, key, &elapsed);
+                if (ret)
+                        gf_log (THIS->name, GF_LOG_TRACE,
+                                "Failed to get run-time");
+
                 switch (status_rcd) {
                 case GF_DEFRAG_STATUS_NOT_STARTED:
                         status = "not started";
@@ -1577,9 +1600,9 @@ gf_cli3_remove_brick_status_cbk (struct rpc_req *req, struct iovec *iov,
                         status = "failed";
                         break;
                 }
-                cli_out ("%40s %16"PRId64 "%13"PRId64 "%13"PRId64 "%13"PRId64
-                        " %14s", node_uuid, files, size, lookup, failures,
-                        status);
+                cli_out ("%40s %16"PRIu64 "%13"PRIu64 "%13"PRIu64 "%13"PRIu64
+                         " %14s %14.2f", node_uuid, files, size, lookup,
+                         failures, status, elapsed);
                 i++;
         } while (i <= counter);
 
@@ -2762,6 +2785,7 @@ done:
         if (local) {
                 local->dict = dict_ref (req_dict);
                 frame->local = local;
+                local = NULL;
         }
 
         ret = dict_allocate_and_serialize (req_dict,
@@ -2780,6 +2804,9 @@ done:
                               (xdrproc_t) xdr_gf_cli_req);
 
 out:
+        if (local)
+                cli_local_wipe (local);
+
         gf_log ("cli", GF_LOG_DEBUG, "Returning %d", ret);
 
         return ret;
@@ -4047,27 +4074,29 @@ gf_cli3_1_top_volume_cbk (struct rpc_req *req, struct iovec *iov,
 {
         gf_cli_rsp                        rsp   = {0,};
         int                               ret   = -1;
-        dict_t                            *dict = NULL;
-        gf1_cli_stats_op                op = GF_CLI_STATS_NONE;
+        dict_t                           *dict = NULL;
+        gf1_cli_stats_op                  op = GF_CLI_STATS_NONE;
         char                              key[256] = {0};
         int                               i = 0;
         int32_t                           brick_count = 0;
         char                              brick[1024];
         int32_t                           members = 0;
-        char                              *filename;
-        char                              *bricks;
-        uint64_t                           value = 0;
+        char                             *filename;
+        char                             *bricks;
+        uint64_t                          value = 0;
         int32_t                           j = 0;
         gf1_cli_top_op                    top_op = GF_CLI_TOP_NONE;
         uint64_t                          nr_open = 0;
         uint64_t                          max_nr_open = 0;
         double                            throughput = 0;
         double                            time = 0;
-        long int                          time_sec = 0;
-        long int                           time_usec = 0;
-        struct tm                         *tm = NULL;
+        int32_t                           time_sec = 0;
+        long int                          time_usec = 0;
         char                              timestr[256] = {0, };
-        char                              *openfd_str = NULL;
+        char                             *openfd_str = NULL;
+        gf_boolean_t                      nfs = _gf_false;
+        gf_boolean_t                      clear_stats = _gf_false;
+        int                               stats_cleared = 0;
 
         if (-1 == req->rpc_status) {
                 goto out;
@@ -4132,14 +4161,31 @@ gf_cli3_1_top_volume_cbk (struct rpc_req *req, struct iovec *iov,
         ret = dict_get_int32 (dict, key, (int32_t*)&top_op);
         if (ret)
                 goto out;
+
+        clear_stats = dict_get_str_boolean (dict, "clear-stats", _gf_false);
+
         while (i < brick_count) {
                 i++;
                 snprintf (brick, sizeof (brick), "%d-brick", i);
                 ret = dict_get_str (dict, brick, &bricks);
                 if (ret)
                         goto out;
-                ret = dict_get_str_boolean (dict, "nfs", _gf_false);
-                if (ret)
+
+                nfs = dict_get_str_boolean (dict, "nfs", _gf_false);
+
+                if (clear_stats) {
+                        memset (key, 0, sizeof (key));
+                        snprintf (key, sizeof (key), "%d-stats-cleared", i);
+                        ret = dict_get_int32 (dict, key, &stats_cleared);
+                        if (ret)
+                                goto out;
+                        cli_out (stats_cleared ? "Cleared stats for %s %s" :
+                                 "Failed to clear stats for %s %s",
+                                 nfs ? "NFS server on" : "brick", bricks);
+                        continue;
+                }
+
+                if (nfs)
                         cli_out ("NFS Server : %s", bricks);
                 else
                         cli_out ("Brick: %s", bricks);
@@ -4220,11 +4266,9 @@ gf_cli3_1_top_volume_cbk (struct rpc_req *req, struct iovec *iov,
                                 ret = dict_get_int32 (dict, key, (int32_t *)&time_usec);
                                 if (ret)
                                         goto out;
-                                tm    = localtime (&time_sec);
-                                if (!tm)
-                                        goto out;
-                                strftime (timestr, 256, "%Y-%m-%d %H:%M:%S", tm);
-                                snprintf (timestr + strlen (timestr), 256 - strlen (timestr),
+                                gf_time_fmt (timestr, sizeof timestr,
+                                             time_sec, gf_timefmt_FT);
+                                snprintf (timestr + strlen (timestr), sizeof timestr - strlen (timestr),
                                   ".%"GF_PRI_SUSECONDS, time_usec);
                                 if (strlen (filename) < VOL_TOP_PERF_FILENAME_DEF_WIDTH)
                                         cli_out ("%*"PRIu64" %-*s %-*s",
@@ -5703,7 +5747,7 @@ gf_cli3_1_mount_cbk (struct rpc_req *req, struct iovec *iov,
                 /* weird sounding but easy to parse... */
                 cli_err ("%d : failed with this errno (%s)",
                          rsp.op_errno, strerror (rsp.op_errno));
-                ret = 1;
+                ret = -1;
         }
 
 out:
@@ -5767,7 +5811,7 @@ gf_cli3_1_umount_cbk (struct rpc_req *req, struct iovec *iov,
                 ret = 0;
         else {
                 cli_err ("umount failed");
-                ret = 1;
+                ret = -1;
         }
 
 out:
@@ -5812,45 +5856,43 @@ cmd_heal_volume_brick_out (dict_t *dict, int brick)
         uint64_t        num_entries = 0;
         int             ret = 0;
         char            key[256] = {0};
-        char            *hostname = NULL;
-        char            *path = NULL;
-        char            *status = NULL;
+        char           *hostname = NULL;
+        char           *path = NULL;
+        char           *status = NULL;
         uint64_t        i = 0;
         uint32_t        time = 0;
-        char            timestr[256];
-        struct tm       *tm = NULL;
+        char            timestr[32] = {0};
 
-        snprintf (key, sizeof (key), "%d-hostname", brick);
+        snprintf (key, sizeof key, "%d-hostname", brick);
         ret = dict_get_str (dict, key, &hostname);
         if (ret)
                 goto out;
-        snprintf (key, sizeof (key), "%d-path", brick);
+        snprintf (key, sizeof key, "%d-path", brick);
         ret = dict_get_str (dict, key, &path);
         if (ret)
                 goto out;
         cli_out ("\nBrick %s:%s", hostname, path);
-        snprintf (key, sizeof (key), "%d-count", brick);
+        snprintf (key, sizeof key, "%d-count", brick);
         ret = dict_get_uint64 (dict, key, &num_entries);
         cli_out ("Number of entries: %"PRIu64, num_entries);
-        snprintf (key, sizeof (key), "%d-status", brick);
+        snprintf (key, sizeof key, "%d-status", brick);
         ret = dict_get_str (dict, key, &status);
         if (status && strlen (status))
                 cli_out ("Status: %s", status);
         for (i = 0; i < num_entries; i++) {
-                snprintf (key, sizeof (key), "%d-%"PRIu64, brick, i);
+                snprintf (key, sizeof key, "%d-%"PRIu64, brick, i);
                 ret = dict_get_str (dict, key, &path);
                 if (ret)
                         continue;
                 time = 0;
-                snprintf (key, sizeof (key), "%d-%"PRIu64"-time", brick, i);
+                snprintf (key, sizeof key, "%d-%"PRIu64"-time", brick, i);
                 ret = dict_get_uint32 (dict, key, &time);
                 if (!time) {
                         cli_out ("%s", path);
                 } else {
-                        tm = localtime ((time_t*)(&time));
-                        strftime (timestr, sizeof (timestr),
-                                  "%Y-%m-%d %H:%M:%S", tm);
-                        if (i ==0) {
+                        gf_time_fmt (timestr, sizeof timestr,
+                                     time, gf_timefmt_FT);
+                        if (i == 0) {
                                 cli_out ("at                    path on brick");
                                 cli_out ("-----------------------------------");
                         }
@@ -5875,6 +5917,8 @@ gf_cli3_1_heal_volume_cbk (struct rpc_req *req, struct iovec *iov,
         int                     brick_count = 0;
         int                     i = 0;
         gf_xl_afr_op_t          heal_op = GF_AFR_OP_INVALID;
+        char                    *operation = NULL;
+        char                    *substr = NULL;
 
         if (-1 == req->rpc_status) {
                 goto out;
@@ -5918,11 +5962,26 @@ gf_cli3_1_heal_volume_cbk (struct rpc_req *req, struct iovec *iov,
 
         gf_log ("cli", GF_LOG_INFO, "Received resp to heal volume");
 
-        if (rsp.op_ret && strcmp (rsp.op_errstr, ""))
-                cli_err ("%s", rsp.op_errstr);
-        else
-                cli_out ("Heal operation on volume %s has been %s", volname,
-                        (rsp.op_ret) ? "unsuccessful": "successful");
+        if ((heal_op == GF_AFR_OP_HEAL_FULL) ||
+            (heal_op == GF_AFR_OP_HEAL_INDEX)) {
+                operation = "Launching Heal operation";
+                substr = "\nUse heal info commands to check status";
+        } else {
+                operation = "Gathering Heal info";
+                substr = "";
+        }
+
+        if (rsp.op_ret) {
+                if (strcmp (rsp.op_errstr, "")) {
+                        cli_err ("%s", rsp.op_errstr);
+                } else {
+                        cli_err ("%s on volume %s has been unsuccessful",
+                                 operation, volname);
+                }
+        } else {
+                cli_out ("%s on volume %s has been successful%s", operation,
+                         volname, substr);
+        }
 
         ret = rsp.op_ret;
         if ((heal_op == GF_AFR_OP_HEAL_FULL) ||

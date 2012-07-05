@@ -71,7 +71,8 @@ xlator_option_validate_int (xlator_t *xl, const char *key, const char *value,
                 goto out;
         }
 
-        if ((opt->min == 0) && (opt->max == 0)) {
+        if ((opt->min == 0) && (opt->max == 0) &&
+            (opt->validate == GF_OPT_VALIDATE_BOTH)) {
                 gf_log (xl->name, GF_LOG_TRACE,
                         "no range check required for 'option %s %s'",
                         key, value);
@@ -79,7 +80,25 @@ xlator_option_validate_int (xlator_t *xl, const char *key, const char *value,
                 goto out;
         }
 
-        if ((inputll < opt->min) || (inputll > opt->max)) {
+        if ((opt->validate == GF_OPT_VALIDATE_MIN)) {
+                if (inputll < opt->min) {
+                        snprintf (errstr, 256,
+                                  "'%lld' in 'option %s %s' is smaller than "
+                                  "minimum value '%"PRId64"'", inputll, key,
+                                  value, opt->min);
+                        gf_log (xl->name, GF_LOG_ERROR, "%s", errstr);
+                        goto out;
+                }
+        } else if ((opt->validate == GF_OPT_VALIDATE_MAX)) {
+                if ((inputll > opt->max)) {
+                        snprintf (errstr, 256,
+                                  "'%lld' in 'option %s %s' is greater than "
+                                  "maximum value '%"PRId64"'", inputll, key,
+                                  value, opt->max);
+                        gf_log (xl->name, GF_LOG_ERROR, "%s", errstr);
+                        goto out;
+                }
+        } else if ((inputll < opt->min) || (inputll > opt->max)) {
                 snprintf (errstr, 256,
                           "'%lld' in 'option %s %s' is out of range "
                           "[%"PRId64" - %"PRId64"]",
@@ -101,7 +120,7 @@ xlator_option_validate_sizet (xlator_t *xl, const char *key, const char *value,
                               volume_option_t *opt, char **op_errstr)
 {
         uint64_t  size = 0;
-        int       ret = -1;
+        int       ret = 0;
         char      errstr[256];
 
         /* Check the range */
@@ -110,6 +129,7 @@ xlator_option_validate_sizet (xlator_t *xl, const char *key, const char *value,
                           "invalid number format \"%s\" in option \"%s\"",
                           value, key);
                 gf_log (xl->name, GF_LOG_ERROR, "%s", errstr);
+                ret = -1;
                 goto out;
         }
 
@@ -117,30 +137,26 @@ xlator_option_validate_sizet (xlator_t *xl, const char *key, const char *value,
                 gf_log (xl->name, GF_LOG_TRACE,
                         "no range check required for 'option %s %s'",
                         key, value);
-                ret = 0;
                 goto out;
         }
 
         if ((size < opt->min) || (size > opt->max)) {
-                if (strncmp (key, "cache-size", 10) == 0) {
+                if ((strncmp (key, "cache-size", 10) == 0) &&
+                    (size > opt->max)) {
                        snprintf (errstr, 256, "Cache size %"PRId64" is out of "
                                  "range [%"PRId64" - %"PRId64"]",
                                  size, opt->min, opt->max);
-                       //*op_errstr = gf_strdup (errstr);
                        gf_log (xl->name, GF_LOG_WARNING, "%s", errstr);
-                       ret = 0;
-                       goto out;
                 } else {
                         snprintf (errstr, 256,
                                   "'%"PRId64"' in 'option %s %s' "
                                   "is out of range [%"PRId64" - %"PRId64"]",
                                   size, key, value, opt->min, opt->max);
                         gf_log (xl->name, GF_LOG_ERROR, "%s", errstr);
-                        goto out;
+                        ret = -1;
                 }
         }
 
-        ret = 0;
 out:
         if (ret && op_errstr)
                 *op_errstr = gf_strdup (errstr);
@@ -993,11 +1009,8 @@ out:
 
 
 static int
-not_null (char *in, char **out)
+pass (char *in, char **out)
 {
-        if (!in || !out)
-                return -1;
-
         *out = in;
         return 0;
 }
@@ -1036,7 +1049,7 @@ pc_or_size (char *in, uint64_t *out)
 }
 
 
-DEFINE_INIT_OPT(char *, str, not_null);
+DEFINE_INIT_OPT(char *, str, pass);
 DEFINE_INIT_OPT(uint64_t, uint64, gf_string2uint64);
 DEFINE_INIT_OPT(int64_t, int64, gf_string2int64);
 DEFINE_INIT_OPT(uint32_t, uint32, gf_string2uint32);
@@ -1046,11 +1059,11 @@ DEFINE_INIT_OPT(uint32_t, percent, gf_string2percent);
 DEFINE_INIT_OPT(uint64_t, percent_or_size, pc_or_size);
 DEFINE_INIT_OPT(gf_boolean_t, bool, gf_string2boolean);
 DEFINE_INIT_OPT(xlator_t *, xlator, xl_by_name);
-DEFINE_INIT_OPT(char *, path, not_null);
+DEFINE_INIT_OPT(char *, path, pass);
 
 
 
-DEFINE_RECONF_OPT(char *, str, not_null);
+DEFINE_RECONF_OPT(char *, str, pass);
 DEFINE_RECONF_OPT(uint64_t, uint64, gf_string2uint64);
 DEFINE_RECONF_OPT(int64_t, int64, gf_string2int64);
 DEFINE_RECONF_OPT(uint32_t, uint32, gf_string2uint32);
@@ -1060,4 +1073,4 @@ DEFINE_RECONF_OPT(uint32_t, percent, gf_string2percent);
 DEFINE_RECONF_OPT(uint64_t, percent_or_size, pc_or_size);
 DEFINE_RECONF_OPT(gf_boolean_t, bool, gf_string2boolean);
 DEFINE_RECONF_OPT(xlator_t *, xlator, xl_by_name);
-DEFINE_RECONF_OPT(char *, path, not_null);
+DEFINE_RECONF_OPT(char *, path, pass);

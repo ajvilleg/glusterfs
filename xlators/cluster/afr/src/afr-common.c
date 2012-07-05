@@ -546,6 +546,10 @@ afr_is_read_child (int32_t *success_children, int32_t *sources,
         gf_boolean_t             success_child = _gf_false;
         gf_boolean_t             source        = _gf_false;
 
+        if (child < 0) {
+                return _gf_false;
+        }
+
         GF_ASSERT (success_children);
         GF_ASSERT (child_count > 0);
 
@@ -562,28 +566,66 @@ out:
         return (success_child && source);
 }
 
+int32_t
+afr_hash_child (int32_t *success_children, int32_t child_count,
+                unsigned int hmode, uuid_t gfid)
+{
+        uuid_t  gfid_copy = {0,};
+
+        if (!hmode) {
+                return -1;
+        }
+
+        if (gfid) {
+               uuid_copy(gfid_copy,gfid);
+        }
+        if (hmode > 1) {
+                /*
+                 * Why getpid?  Because it's one of the cheapest calls
+                 * available - faster than gethostname etc. - and returns a
+                 * constant-length value that's sure to be shorter than a UUID.
+                 * It's still very unlikely to be the same across clients, so
+                 * it still provides good mixing.  We're not trying for
+                 * perfection here.  All we need is a low probability that
+                 * multiple clients won't converge on the same subvolume.
+                 */
+                *((pid_t *)gfid_copy) = getpid();
+        }
+
+        return SuperFastHash((char *)gfid_copy,
+                             sizeof(gfid_copy)) % child_count;
+}
+
 /* If sources is NULL the xattrs are assumed to be of source for all
  * success_children.
  */
 int
-afr_select_read_child_from_policy (int32_t *success_children, int32_t child_count,
-                                   int32_t prev_read_child,
-                                   int32_t config_read_child, int32_t *sources)
+afr_select_read_child_from_policy (int32_t *success_children,
+                                   int32_t child_count, int32_t prev_read_child,
+                                   int32_t config_read_child, int32_t *sources,
+                                   unsigned int hmode, uuid_t gfid)
 {
         int32_t                  read_child   = -1;
         int                      i            = 0;
 
         GF_ASSERT (success_children);
 
+        read_child = config_read_child;
+        if (afr_is_read_child (success_children, sources, child_count,
+                               read_child))
+                goto out;
+
         read_child = prev_read_child;
         if (afr_is_read_child (success_children, sources, child_count,
                                read_child))
                 goto out;
 
-        read_child = config_read_child;
+        read_child = afr_hash_child (success_children, child_count,
+                                     hmode, gfid);
         if (afr_is_read_child (success_children, sources, child_count,
-                               read_child))
+                               read_child)) {
                 goto out;
+        }
 
         for (i = 0; i < child_count; i++) {
                 read_child = success_children[i];
@@ -604,7 +646,7 @@ out:
 void
 afr_set_read_ctx_from_policy (xlator_t *this, inode_t *inode,
                               int32_t *fresh_children, int32_t prev_read_child,
-                              int32_t config_read_child)
+                              int32_t config_read_child, uuid_t gfid)
 {
         int                      read_child = -1;
         afr_private_t            *priv = NULL;
@@ -614,7 +656,8 @@ afr_set_read_ctx_from_policy (xlator_t *this, inode_t *inode,
                                                         priv->child_count,
                                                         prev_read_child,
                                                         config_read_child,
-                                                        NULL);
+                                                        NULL,
+                                                        priv->hash_mode, gfid);
         if (read_child >= 0)
                 afr_inode_set_read_ctx (this, inode, read_child,
                                         fresh_children);
@@ -1222,7 +1265,6 @@ afr_detect_self_heal_by_lookup_status (afr_local_t *local, xlator_t *this,
             IA_ISREG (local->cont.lookup.inode->ia_type)) {
                 local->self_heal.do_data_self_heal = _gf_true;
                 local->self_heal.do_gfid_self_heal    = _gf_true;
-                local->self_heal.do_missing_entry_self_heal    = _gf_true;
                 gf_log (this->name, GF_LOG_WARNING,
                         "split brain detected during lookup of %s.",
                         local->loc.path);
@@ -1271,6 +1313,7 @@ afr_lookup_select_read_child (afr_local_t *local, xlator_t *this,
         dict_t                  **xattrs       = NULL;
         int32_t                 *success_children = NULL;
         afr_transaction_type    type           = AFR_METADATA_TRANSACTION;
+        uuid_t                  *gfid          = NULL;
 
         GF_ASSERT (local);
         GF_ASSERT (this);
@@ -1284,8 +1327,9 @@ afr_lookup_select_read_child (afr_local_t *local, xlator_t *this,
         ia_type = local->cont.lookup.bufs[success_children[0]].ia_type;
         type = afr_transaction_type_get (ia_type);
         xattrs = local->cont.lookup.xattrs;
+        gfid = &local->cont.lookup.buf.ia_gfid;
         source = afr_lookup_select_read_child_by_txn_type (this, local, xattrs,
-                                                           type);
+                                                           type, *gfid);
         if (source < 0) {
                 gf_log (this->name, GF_LOG_DEBUG, "failed to select source "
                         "for %s", local->loc.path);
@@ -1990,12 +2034,79 @@ afr_lookup_handle_first_success (afr_local_t *local, xlator_t *this,
         afr_set_root_inode_on_first_lookup (local, this, inode);
 }
 
+static int32_t
+afr_discovery_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+                   int32_t op_ret, int32_t op_errno, dict_t *dict,
+                   dict_t *xdata)
+{
+        int              ret            = 0;
+        char            *pathinfo       = NULL;
+        gf_boolean_t     is_local        = _gf_false;
+        afr_private_t   *priv           = NULL;
+        int32_t          child_index    = -1;
+
+        if (op_ret != 0) {
+                goto out;
+        }
+
+        ret = dict_get_str (dict, GF_XATTR_PATHINFO_KEY, &pathinfo);
+        if (ret != 0) {
+                goto out;
+        }
+
+        ret = afr_local_pathinfo (pathinfo, &is_local);
+        if (ret) {
+                goto out;
+        }
+
+        priv = this->private;
+        /*
+         * Note that one local subvolume will override another here.  The only
+         * way to avoid that would be to retain extra information about whether
+         * the previous read_child is local, and it's just not worth it.  Even
+         * the slowest local subvolume is far preferable to a remote one.
+         */
+        if (is_local) {
+                child_index = (int32_t)(long)cookie;
+                gf_log (this->name, GF_LOG_INFO,
+                        "selecting local read_child %s",
+                        priv->children[child_index]->name);
+                priv->read_child = child_index;
+        }
+
+out:
+        STACK_DESTROY(frame->root);
+        return 0;
+}
+
+static void
+afr_attempt_local_discovery (xlator_t *this, int32_t child_index)
+{
+        call_frame_t    *newframe = NULL;
+        loc_t            tmploc = {0,};
+        afr_private_t   *priv = this->private;
+
+        newframe = create_frame(this,this->ctx->pool);
+        if (!newframe) {
+                return;
+        }
+
+        tmploc.gfid[sizeof(tmploc.gfid)-1] = 1;
+        STACK_WIND_COOKIE (newframe, afr_discovery_cbk,
+                           (void *)(long)child_index,
+                           priv->children[child_index],
+                           priv->children[child_index]->fops->getxattr,
+                           &tmploc, GF_XATTR_PATHINFO_KEY, NULL);
+}
+
 static void
 afr_lookup_handle_success (afr_local_t *local, xlator_t *this, int32_t child_index,
                            int32_t op_ret, int32_t op_errno, inode_t *inode,
                            struct iatt *buf, dict_t *xattr,
                            struct iatt *postparent)
 {
+        afr_private_t   *priv   = this->private;
+
         if (local->success_count == 0) {
                 if (local->op_errno != ESTALE) {
                         local->op_ret = op_ret;
@@ -2008,6 +2119,11 @@ afr_lookup_handle_success (afr_local_t *local, xlator_t *this, int32_t child_ind
 
         afr_lookup_cache_args (local, child_index, xattr,
                                buf, postparent);
+
+        if (local->do_discovery && (priv->read_child == (-1))) {
+                afr_attempt_local_discovery(this,child_index);
+        }
+
         local->cont.lookup.success_children[local->success_count] = child_index;
         local->success_count++;
 }
@@ -2114,25 +2230,31 @@ afr_lookup (call_frame_t *frame, xlator_t *this,
         frame->local = local;
         local->fop = GF_FOP_LOOKUP;
 
-        if (loc->path && !strcmp (loc->path, "/" GF_REPLICATE_TRASH_DIR)) {
-                op_errno = ENOENT;
+        loc_copy (&local->loc, loc);
+        ret = loc_path (&local->loc, NULL);
+        if (ret < 0) {
+                op_errno = EINVAL;
                 goto out;
         }
 
-        loc_copy (&local->loc, loc);
-
-        ret = inode_ctx_get (loc->inode, this, &ctx);
+        ret = inode_ctx_get (local->loc.inode, this, &ctx);
         if (ret == 0) {
                 /* lookup is a revalidate */
 
                 local->read_child_index = afr_inode_get_read_ctx (this,
-                                                                  loc->inode,
-                                                                  NULL);
+                                                               local->loc.inode,
+                                                               NULL);
         } else {
                 LOCK (&priv->read_child_lock);
                 {
-                        local->read_child_index = (++priv->read_child_rr)
-                                % (priv->child_count);
+                        if (priv->hash_mode) {
+                                local->read_child_index = -1;
+                        }
+                        else {
+                                local->read_child_index =
+                                        (++priv->read_child_rr) %
+                                        (priv->child_count);
+                        }
                 }
                 UNLOCK (&priv->read_child_lock);
                 local->cont.lookup.fresh_lookup = _gf_true;
@@ -2163,24 +2285,28 @@ afr_lookup (call_frame_t *frame, xlator_t *this,
         /* By default assume ENOTCONN. On success it will be set to 0. */
         local->op_errno = ENOTCONN;
 
-        local->call_count = afr_up_children_count (local->child_up,
-                                                   priv->child_count);
-        ret = afr_lookup_xattr_req_prepare (local, this, xattr_req, loc,
+        ret = afr_lookup_xattr_req_prepare (local, this, xattr_req, &local->loc,
                                             &gfid_req);
         if (ret) {
                 local->op_errno = -ret;
                 goto out;
         }
         afr_lookup_save_gfid (local->cont.lookup.gfid_req, gfid_req,
-                              loc);
+                              &local->loc);
         local->fop = GF_FOP_LOOKUP;
+        if (priv->choose_local && !priv->did_discovery) {
+                if (gfid_req && __is_root_gfid(gfid_req)) {
+                        local->do_discovery = _gf_true;
+                        priv->did_discovery = _gf_true;
+                }
+        }
         for (i = 0; i < priv->child_count; i++) {
                 if (local->child_up[i]) {
                         STACK_WIND_COOKIE (frame, afr_lookup_cbk,
                                            (void *) (long) i,
                                            priv->children[i],
                                            priv->children[i]->fops->lookup,
-                                           loc, local->xattr_req);
+                                           &local->loc, local->xattr_req);
                         if (!--call_count)
                                 break;
                 }
@@ -2274,6 +2400,7 @@ __afr_fd_ctx_set (xlator_t *this, fd_t *fd)
                 goto out;
         }
 
+	pthread_mutex_init (&fd_ctx->delay_lock, NULL);
         INIT_LIST_HEAD (&fd_ctx->paused_calls);
         INIT_LIST_HEAD (&fd_ctx->entries);
 
@@ -2527,6 +2654,8 @@ afr_cleanup_fd_ctx (xlator_t *this, fd_t *fd)
 
                 if (fd_ctx->lock_acquired)
                         GF_FREE (fd_ctx->lock_acquired);
+
+		pthread_mutex_destroy (&fd_ctx->delay_lock);
 
                 GF_FREE (fd_ctx);
         }
@@ -3574,6 +3703,14 @@ afr_notify (xlator_t *this, int32_t event,
 
         if (!priv)
                 return 0;
+
+        /*
+         * We need to reset this in case children come up in "staggered"
+         * fashion, so that we discover a late-arriving local subvolume.  Note
+         * that we could end up issuing N lookups to the first subvolume, and
+         * O(N^2) overall, but N is small for AFR so it shouldn't be an issue.
+         */
+        priv->did_discovery = _gf_false;
 
         had_heard_from_all = 1;
         for (i = 0; i < priv->child_count; i++) {

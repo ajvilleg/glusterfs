@@ -314,7 +314,7 @@ __socket_server_bind (rpc_transport_t *this)
                 memcpy (&unix_addr, SA (&this->myinfo.sockaddr),
                         this->myinfo.sockaddr_len);
                 reuse_check_sock = socket (AF_UNIX, SOCK_STREAM, 0);
-                if (reuse_check_sock > 0) {
+                if (reuse_check_sock >= 0) {
                         ret = connect (reuse_check_sock, SA (&unix_addr),
                                        this->myinfo.sockaddr_len);
                         if ((ret == -1) && (ECONNREFUSED == errno)) {
@@ -872,10 +872,14 @@ __socket_read_vectored_request (rpc_transport_t *this, rpcsvc_vector_sizer vecto
 
         case SP_STATE_READ_VERFBYTES:
 sp_state_read_verfbytes:
-                proghdr_buf = priv->incoming.frag.fragcurrent;
+		/* set the base_addr 'persistently' across multiple calls
+		   into the state machine */
+                priv->incoming.proghdr_base_addr = priv->incoming.frag.fragcurrent;
+
                 priv->incoming.frag.call_body.request.vector_sizer_state =
                         vector_sizer (priv->incoming.frag.call_body.request.vector_sizer_state,
-                                      &readsize, proghdr_buf);
+                                      &readsize, priv->incoming.proghdr_base_addr,
+                                      priv->incoming.frag.fragcurrent);
                 __socket_proto_init_pending (priv, readsize);
                 priv->incoming.frag.call_body.request.vector_state
                         = SP_STATE_READING_PROGHDR;
@@ -884,20 +888,41 @@ sp_state_read_verfbytes:
 
         case SP_STATE_READING_PROGHDR:
                 __socket_proto_read (priv, ret);
-sp_state_reading_proghdr:
+		priv->incoming.frag.call_body.request.vector_state =
+			SP_STATE_READ_PROGHDR;
+
+		/* fall through */
+
+	case SP_STATE_READ_PROGHDR:
+sp_state_read_proghdr:
                 priv->incoming.frag.call_body.request.vector_sizer_state =
                         vector_sizer (priv->incoming.frag.call_body.request.vector_sizer_state,
-                                      &readsize, proghdr_buf);
+                                      &readsize,
+				      priv->incoming.proghdr_base_addr,
+                                      priv->incoming.frag.fragcurrent);
                 if (readsize == 0) {
                         priv->incoming.frag.call_body.request.vector_state =
-                                SP_STATE_READ_PROGHDR;
-                } else {
-                        __socket_proto_init_pending (priv, readsize);
-                        __socket_proto_read (priv, ret);
-                        goto sp_state_reading_proghdr;
+                                SP_STATE_READ_PROGHDR_XDATA;
+			goto sp_state_read_proghdr_xdata;
                 }
 
-        case SP_STATE_READ_PROGHDR:
+		__socket_proto_init_pending (priv, readsize);
+
+                priv->incoming.frag.call_body.request.vector_state =
+			SP_STATE_READING_PROGHDR_XDATA;
+
+		/* fall through */
+
+	case SP_STATE_READING_PROGHDR_XDATA:
+		__socket_proto_read (priv, ret);
+
+		priv->incoming.frag.call_body.request.vector_state =
+			SP_STATE_READ_PROGHDR;
+		/* check if the vector_sizer() has more to say */
+		goto sp_state_read_proghdr;
+
+        case SP_STATE_READ_PROGHDR_XDATA:
+sp_state_read_proghdr_xdata:
                 if (priv->incoming.payload_vector.iov_base == NULL) {
 
                         size = RPC_FRAGSIZE (priv->incoming.fraghdr) -
@@ -2803,8 +2828,7 @@ struct volume_options options[] = {
         },
         { .key   = { "transport.address-family",
                      "address-family" },
-          .value = {"inet", "inet6", "inet/inet6", "inet6/inet",
-                    "unix", "inet-sdp" },
+          .value = {"inet", "inet6", "unix", "inet-sdp" },
           .type  = GF_OPTION_TYPE_STR
         },
 

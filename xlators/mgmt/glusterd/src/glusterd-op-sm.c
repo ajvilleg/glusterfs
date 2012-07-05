@@ -415,6 +415,12 @@ glusterd_op_stage_set_volume (dict_t *dict, char **op_errstr)
                         ret = 0;
                         goto out;
                 }
+
+                if (is_key_glusterd_hooks_friendly (this, volname, key)) {
+                        ret = 0;
+                        goto out;
+                }
+
                 exists = glusterd_check_option_exists (key, &key_fixed);
                 if (exists == -1) {
                         ret = -1;
@@ -874,23 +880,23 @@ out:
 }
 
 
-void
+static void
 _delete_reconfig_opt (dict_t *this, char *key, data_t *value, void *data)
 {
-        int             exists = 0;
-        int32_t         is_force = 0;
+        int32_t        *is_force = 0;
 
         GF_ASSERT (data);
-        is_force = *((int32_t*)data);
-        exists = glusterd_check_option_exists(key, NULL);
+        is_force = (int32_t*)data;
 
-        if (exists != 1)
-                goto out;
-
-        if ((!is_force) &&
+        if (*is_force != 1 &&
             (_gf_true == glusterd_check_voloption_flags (key,
-                                                         OPT_FLAG_FORCE)))
+                                                         OPT_FLAG_FORCE))) {
+                /* indicate to caller that we don't set the option
+                 * due to being protected
+                 */
+                *is_force = -1;
                 goto out;
+        }
 
         gf_log ("", GF_LOG_DEBUG, "deleting dict with key=%s,value=%s",
                 key, value->data);
@@ -899,12 +905,13 @@ out:
         return;
 }
 
-int
+static int
 glusterd_options_reset (glusterd_volinfo_t *volinfo, char *key,
-                        int32_t is_force)
+                        int32_t *is_force)
 {
         int                      ret = 0;
         data_t                  *value = NULL;
+        char                    *key_fixed = NULL;
 
         gf_log ("", GF_LOG_DEBUG, "Received volume set reset command");
 
@@ -912,15 +919,22 @@ glusterd_options_reset (glusterd_volinfo_t *volinfo, char *key,
         GF_ASSERT (key);
 
         if (!strncmp(key, "all", 3))
-                dict_foreach (volinfo->dict, _delete_reconfig_opt, &is_force);
+                dict_foreach (volinfo->dict, _delete_reconfig_opt, is_force);
         else {
-                value = dict_get (volinfo->dict, key);
-                if (!value) {
+                if (glusterd_check_option_exists (key, &key_fixed) != 1) {
                         gf_log ("glusterd", GF_LOG_ERROR,
-                                "Could not get value");
+                                "volinfo dict inconsistency: option %s not found",
+                                key);
+                        ret = -1;
                         goto out;
                 }
-                _delete_reconfig_opt (volinfo->dict, key, value, &is_force);
+                value = dict_get (volinfo->dict, key_fixed);
+                if (!value) {
+                        gf_log ("glusterd", GF_LOG_DEBUG,
+                                "no value set for option %s", key_fixed);
+                        goto out;
+                }
+                _delete_reconfig_opt (volinfo->dict, key_fixed, value, is_force);
         }
 
         ret = glusterd_create_volfiles_and_notify_services (volinfo);
@@ -945,13 +959,15 @@ glusterd_options_reset (glusterd_volinfo_t *volinfo, char *key,
         ret = 0;
 
 out:
+        if (key_fixed)
+                GF_FREE (key_fixed);
         gf_log ("", GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
 }
 
 
 static int
-glusterd_op_reset_volume (dict_t *dict)
+glusterd_op_reset_volume (dict_t *dict, char **op_errstr)
 {
         glusterd_volinfo_t      *volinfo    = NULL;
         int                     ret         = -1;
@@ -981,7 +997,12 @@ glusterd_op_reset_volume (dict_t *dict)
                 goto out;
         }
 
-        ret = glusterd_options_reset (volinfo, key, is_force);
+        ret = glusterd_options_reset (volinfo, key, &is_force);
+        if (is_force == -1) {
+                ret = -1;
+                gf_asprintf(op_errstr, "'%s' is protected. To reset use 'force'.",
+                            key);
+        }
 
 out:
         gf_log ("", GF_LOG_DEBUG, "'volume reset' returning %d", ret);
@@ -1106,6 +1127,12 @@ glusterd_op_set_volume (dict_t *dict)
                                                  &volinfo->memory_accounting);
                         goto out;
                 }
+
+                if (is_key_glusterd_hooks_friendly (this, volname, key)) {
+                        ret = 0;
+                        goto out;
+                }
+
                 ret = glusterd_check_option_exists (key, &key_fixed);
                 GF_ASSERT (ret);
                 if (ret == -1) {
@@ -1505,7 +1532,7 @@ glusterd_op_status_volume (dict_t *dict, char **op_errstr,
                 if (ret)
                         goto out;
 
-                if (uuid_compare (brickinfo->uuid, priv->uuid))
+                if (uuid_compare (brickinfo->uuid, MY_UUID))
                         goto out;
 
                 glusterd_add_brick_to_dict (volinfo, brickinfo, rsp_dict,
@@ -1519,7 +1546,7 @@ glusterd_op_status_volume (dict_t *dict, char **op_errstr,
         } else {
                 list_for_each_entry (brickinfo, &volinfo->bricks, brick_list) {
                         brick_index++;
-                        if (uuid_compare (brickinfo->uuid, priv->uuid))
+                        if (uuid_compare (brickinfo->uuid, MY_UUID))
                                 continue;
 
                         glusterd_add_brick_to_dict (volinfo, brickinfo,
@@ -1657,7 +1684,7 @@ glusterd_op_ac_send_unlock (glusterd_op_sm_event_t *event, void *ctx)
         priv = this->private;
         GF_ASSERT (priv);
 
-        /*ret = glusterd_unlock (priv->uuid);
+        /*ret = glusterd_unlock (MY_UUID);
 
         if (ret)
                 goto out;
@@ -2271,12 +2298,22 @@ glusterd_op_commit_hook (glusterd_op_t op, dict_t *op_ctx,  glusterd_commit_hook
         char            scriptdir[PATH_MAX]     = {0, };
         char            type_subdir[256]        = {0, };
         char            *cmd_subdir             = NULL;
+        int             ret                     = -1;
 
         priv = THIS->private;
-        if (type == GD_COMMIT_HOOK_PRE)
-                strcpy (type_subdir, "pre");
-        else if (type == GD_COMMIT_HOOK_POST)
-                strcpy (type_subdir, "post");
+        switch (type) {
+                case GD_COMMIT_HOOK_NONE:
+                case GD_COMMIT_HOOK_MAX:
+                        /*Won't be called*/
+                        break;
+
+                case GD_COMMIT_HOOK_PRE:
+                        strcpy (type_subdir, "pre");
+                        break;
+                case GD_COMMIT_HOOK_POST:
+                        strcpy (type_subdir, "post");
+                        break;
+        }
 
         cmd_subdir = glusterd_hooks_get_hooks_cmd_subdir (op);
         if (strlen (cmd_subdir) == 0)
@@ -2286,7 +2323,23 @@ glusterd_op_commit_hook (glusterd_op_t op, dict_t *op_ctx,  glusterd_commit_hook
         snprintf (scriptdir, sizeof (scriptdir), "%s/%s/%s",
                   hookdir, cmd_subdir, type_subdir);
 
-        return glusterd_hooks_run_hooks (scriptdir, op, op_ctx, type);
+        switch (type) {
+                case GD_COMMIT_HOOK_NONE:
+                case GD_COMMIT_HOOK_MAX:
+                        /*Won't be called*/
+                        break;
+
+                case GD_COMMIT_HOOK_PRE:
+                        ret = glusterd_hooks_run_hooks (scriptdir, op, op_ctx,
+                                                        type);
+                        break;
+                case GD_COMMIT_HOOK_POST:
+                        ret = glusterd_hooks_post_stub_enqueue (scriptdir, op,
+                                                                op_ctx);
+                        break;
+        }
+
+        return ret;
 }
 
 static int
@@ -2617,7 +2670,7 @@ glusterd_op_txn_complete ()
         glusterd_op_reset_ctx ();
         glusterd_op_clear_errstr ();
 
-        ret = glusterd_unlock (priv->uuid);
+        ret = glusterd_unlock (MY_UUID);
 
         /* unlock cant/shouldnt fail here!! */
         if (ret) {
@@ -2981,7 +3034,7 @@ glusterd_op_commit_perform (glusterd_op_t op, dict_t *dict, char **op_errstr,
                         break;
 
                 case GD_OP_RESET_VOLUME:
-                        ret = glusterd_op_reset_volume (dict);
+                        ret = glusterd_op_reset_volume (dict, op_errstr);
                         break;
 
                 case GD_OP_REMOVE_BRICK:
@@ -3093,7 +3146,7 @@ glusterd_profile_volume_brick_rsp (void *pending_entry,
                 snprintf (brick, sizeof (brick), "%s:%s", brickinfo->hostname,
                           brickinfo->path);
         } else if (type == GD_NODE_NFS) {
-                snprintf (brick, sizeof (brick), "%s", uuid_utoa (priv->uuid));
+                snprintf (brick, sizeof (brick), "%s", uuid_utoa (MY_UUID));
         }
         full_brick = gf_strdup (brick);
         GF_ASSERT (full_brick);
@@ -3297,7 +3350,7 @@ glusterd_defrag_volume_node_rsp (dict_t *req_dict, dict_t *rsp_dict,
         if (ret)
                 gf_log (THIS->name, GF_LOG_ERROR, "Failed to set count");
 
-        snprintf (buf, 1024, "%s", uuid_utoa (priv->uuid));
+        snprintf (buf, 1024, "%s", uuid_utoa (MY_UUID));
         node_str = gf_strdup (buf);
 
         snprintf (key, 256, "node-uuid-%d",i);
@@ -3340,6 +3393,13 @@ glusterd_defrag_volume_node_rsp (dict_t *req_dict, dict_t *rsp_dict,
         if (ret)
                 gf_log (THIS->name, GF_LOG_ERROR,
                         "failed to set failure count");
+
+        memset (key, 0, 256);
+        snprintf (key, 256, "run-time-%d", i);
+        ret = dict_set_double (op_ctx, key, volinfo->rebalance_time);
+        if (ret)
+                gf_log (THIS->name, GF_LOG_ERROR,
+                        "failed to set run-time");
 
 out:
         return ret;
@@ -3709,7 +3769,7 @@ _select_rxlators_with_local_bricks (xlator_t *this, glusterd_volinfo_t *volinfo,
                 if (uuid_is_null (brickinfo->uuid))
                         (void)glusterd_resolve_brick (brickinfo);
 
-                if (!uuid_compare (priv->uuid, brickinfo->uuid))
+                if (!uuid_compare (MY_UUID, brickinfo->uuid))
                         add = _gf_true;
                 if (index % replica_count == 0) {
                         if (add) {
@@ -3749,7 +3809,7 @@ _select_rxlators_for_full_self_heal (xlator_t *this,
                         uuid_copy (candidate, brickinfo->uuid);
 
                 if (index % replica_count == 0) {
-                        if (!uuid_compare (priv->uuid, candidate)) {
+                        if (!uuid_compare (MY_UUID, candidate)) {
                                 _add_rxlator_to_dict (dict, volinfo->volname,
                                                       (index-1)/replica_count,
                                                       rxlator_count);
@@ -3956,7 +4016,7 @@ glusterd_bricks_select_status_volume (dict_t *dict, char **op_errstr)
                 if (ret)
                         goto out;
 
-                if (uuid_compare (brickinfo->uuid, priv->uuid)||
+                if (uuid_compare (brickinfo->uuid, MY_UUID)||
                     !glusterd_is_brick_started (brickinfo))
                         goto out;
 
@@ -4013,7 +4073,7 @@ glusterd_bricks_select_status_volume (dict_t *dict, char **op_errstr)
         } else {
                 list_for_each_entry (brickinfo, &volinfo->bricks, brick_list) {
                         brick_index++;
-                        if (uuid_compare (brickinfo->uuid, priv->uuid) ||
+                        if (uuid_compare (brickinfo->uuid, MY_UUID) ||
                             !glusterd_is_brick_started (brickinfo)) {
                                 continue;
                         }
@@ -4058,7 +4118,7 @@ glusterd_op_ac_send_brick_op (glusterd_op_sm_event_t *event, void *ctx)
                                      gf_gld_mt_op_allack_ctx_t);
                 op = glusterd_op_get_op ();
                 req_ctx->op = op;
-                uuid_copy (req_ctx->uuid, priv->uuid);
+                uuid_copy (req_ctx->uuid, MY_UUID);
                 ret = glusterd_op_build_payload (&req_ctx->dict, &op_errstr);
                 if (ret) {
                         gf_log (this->name, GF_LOG_ERROR,

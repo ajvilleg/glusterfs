@@ -694,9 +694,7 @@ afr_sh_entry_expunge_entry (call_frame_t *frame, xlator_t *this,
         name = entry->d_name;
 
         if ((strcmp (name, ".") == 0)
-            || (strcmp (name, "..") == 0)
-            || ((strcmp (local->loc.path, "/") == 0)
-                && (strcmp (name, GF_REPLICATE_TRASH_DIR) == 0))) {
+            || (strcmp (name, "..") == 0)) {
 
                 gf_log (this->name, GF_LOG_TRACE,
                         "skipping inspection of %s under %s",
@@ -1197,6 +1195,18 @@ afr_sh_entry_impunge_hardlink_cbk (call_frame_t *impunge_frame, void *cookie,
                                    struct iatt *postparent, dict_t *xdata)
 {
         int              call_count        = 0;
+        afr_local_t     *impunge_local = NULL;
+        afr_self_heal_t *impunge_sh  = NULL;
+
+        impunge_local = impunge_frame->local;
+        impunge_sh = &impunge_local->self_heal;
+
+        if (IA_IFLNK == impunge_sh->entrybuf.ia_type) {
+                //For symlinks impunge is attempted un-conditionally
+                //So the file can already exist.
+                if ((op_ret < 0) && (op_errno == EEXIST))
+                        op_ret = 0;
+        }
 
         call_count = afr_frame_return (impunge_frame);
         if (call_count == 0)
@@ -1941,9 +1951,7 @@ afr_sh_entry_impunge_entry (call_frame_t *frame, xlator_t *this,
         sh->impunge_done = afr_sh_entry_impunge_entry_done;
 
         if ((strcmp (entry->d_name, ".") == 0)
-            || (strcmp (entry->d_name, "..") == 0)
-            || ((strcmp (local->loc.path, "/") == 0)
-                && (strcmp (entry->d_name, GF_REPLICATE_TRASH_DIR) == 0))) {
+            || (strcmp (entry->d_name, "..") == 0)) {
 
                 gf_log (this->name, GF_LOG_TRACE,
                         "skipping inspection of %s under %s",

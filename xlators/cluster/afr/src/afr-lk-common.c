@@ -57,6 +57,9 @@
 int
 afr_lock_blocking (call_frame_t *frame, xlator_t *this, int child_index);
 
+static int
+afr_copy_locked_nodes (call_frame_t *frame, xlator_t *this);
+
 static uint64_t afr_lock_number = 1;
 
 static uint64_t
@@ -586,7 +589,6 @@ afr_unlock_inodelk (call_frame_t *frame, xlator_t *this)
         int i = 0;
         int piggyback = 0;
         afr_fd_ctx_t        *fd_ctx      = NULL;
-        gf_boolean_t    fd_lock_owner = _gf_false;
 
 
         local    = frame->local;
@@ -621,11 +623,6 @@ afr_unlock_inodelk (call_frame_t *frame, xlator_t *this)
                 if (local->fd) {
                         flock_use = &flock;
                         if (!local->transaction.eager_lock[i]) {
-                                if (fd_lock_owner) {
-                                        afr_set_lk_owner (frame, this,
-                                                          frame->root);
-                                        fd_lock_owner = _gf_false;
-                                }
                                 goto wind;
                         }
 
@@ -642,10 +639,6 @@ afr_unlock_inodelk (call_frame_t *frame, xlator_t *this)
                         }
                         UNLOCK (&local->fd->lock);
 
-                        if (!fd_lock_owner) {
-                                afr_set_lk_owner (frame, this, local->fd);
-                                fd_lock_owner = _gf_true;
-                        }
                         if (piggyback) {
                                 afr_unlock_inodelk_cbk (frame, (void *) (long) i,
                                                         this, 1, 0, NULL);
@@ -860,6 +853,7 @@ afr_lock_lower_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         UNLOCK (&frame->lock);
 
         if (op_ret != 0) {
+                afr_copy_locked_nodes (frame, this);
                 afr_unlock (frame, this);
                 goto out;
         } else {
@@ -1428,7 +1422,6 @@ afr_nonblocking_inodelk (call_frame_t *frame, xlator_t *this)
         struct              gf_flock full_flock = {0,};
         struct              gf_flock *flock_use = NULL;
         int                 piggyback = 0;
-        gf_boolean_t        fd_lock_owner = _gf_false;
 
         local    = frame->local;
         int_lock = &local->internal_lock;
@@ -1478,16 +1471,13 @@ afr_nonblocking_inodelk (call_frame_t *frame, xlator_t *this)
 
                         flock_use = &flock;
                         if (!priv->eager_lock) {
-                                if (fd_lock_owner) {
-                                        afr_set_lk_owner (frame, this,
-                                                          frame->root);
-                                        fd_lock_owner = _gf_false;
-                                }
                                 goto wind;
                         }
 
                         piggyback = priv->fast_path;
                         local->transaction.eager_lock[i] = 1;
+
+			afr_set_delayed_post_op (frame, this);
 
                         LOCK (&local->fd->lock);
                         {
@@ -1497,11 +1487,6 @@ afr_nonblocking_inodelk (call_frame_t *frame, xlator_t *this)
                                 }
                         }
                         UNLOCK (&local->fd->lock);
-
-                        if (!fd_lock_owner) {
-                                afr_set_lk_owner (frame, this, local->fd);
-                                fd_lock_owner = _gf_true;
-                        }
 
                         if (piggyback) {
                                 /* (op_ret == 1) => indicate piggybacked lock */
@@ -1757,7 +1742,6 @@ afr_unlock (call_frame_t *frame, xlator_t *this)
         local = frame->local;
 
         if (transaction_lk_op (local)) {
-                afr_set_lk_owner (frame, this, frame->root);
                 if (is_afr_lock_transaction (local))
                         afr_unlock_inodelk (frame, this);
                 else

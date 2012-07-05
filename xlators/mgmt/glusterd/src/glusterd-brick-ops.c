@@ -1010,7 +1010,9 @@ glusterd_op_perform_remove_brick (glusterd_volinfo_t  *volinfo, char *brick,
         if (ret)
                 goto out;
 
-        if (!uuid_compare (brickinfo->uuid, priv->uuid)) {
+        glusterd_volinfo_reset_defrag_stats (volinfo);
+
+        if (!uuid_compare (brickinfo->uuid, MY_UUID)) {
                 /* Only if the brick is in this glusterd, do the rebalance */
                 if (need_migrate)
                         *need_migrate = 1;
@@ -1139,6 +1141,9 @@ glusterd_op_stage_add_brick (dict_t *dict, char **op_errstr)
                 if (!ret) {
                         gf_log (THIS->name, GF_LOG_ERROR,
                                 "Adding duplicate brick: %s", brick);
+                        snprintf (msg, sizeof (msg), "Brick %s is already a "
+                                  "part of the volume", brick);
+                        *op_errstr = gf_strdup (msg);
                         ret = -1;
                         goto out;
                 } else {
@@ -1160,7 +1165,7 @@ glusterd_op_stage_add_brick (dict_t *dict, char **op_errstr)
                         goto out;
                 }
 
-                if (!uuid_compare (brickinfo->uuid, priv->uuid)) {
+                if (!uuid_compare (brickinfo->uuid, MY_UUID)) {
                         ret = glusterd_brick_create_path (brickinfo->hostname,
                                                           brickinfo->path,
                                                           volinfo->volume_id,

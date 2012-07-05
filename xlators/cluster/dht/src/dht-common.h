@@ -60,6 +60,7 @@ typedef struct dht_layout  dht_layout_t;
 
 typedef enum {
         DHT_HASH_TYPE_DM,
+        DHT_HASH_TYPE_DM_USER,
 } dht_hashfn_type_t;
 
 /* rebalance related */
@@ -206,6 +207,8 @@ struct gf_defrag_info_ {
         pid_t                        pid;
         inode_t                     *root_inode;
         uuid_t                       node_uuid;
+        struct timeval               start_time;
+        gf_boolean_t                 stats;
 
 };
 
@@ -239,8 +242,6 @@ struct dht_conf {
         /* This is the count used as the distribute layout for a directory */
         /* Will be a global flag to control the layout spread count */
         uint32_t       dir_spread_cnt;
-
-	struct syncenv *env; /* The env pointer to the rebalance synctask */
 
         /* to keep track of nodes which are decomissioned */
         xlator_t     **decommissioned_bricks;

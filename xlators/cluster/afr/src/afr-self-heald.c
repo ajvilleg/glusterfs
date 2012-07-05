@@ -671,6 +671,62 @@ out:
         return;
 }
 
+static int
+get_pathinfo_host (char *pathinfo, char *hostname, size_t size)
+{
+        char    *start = NULL;
+        char    *end = NULL;
+        int     ret  = -1;
+        int     i    = 0;
+
+        if (!pathinfo)
+                goto out;
+
+        start = strchr (pathinfo, ':');
+        if (!start)
+                goto out;
+        end = strrchr (pathinfo, ':');
+        if (start == end)
+                goto out;
+
+        memset (hostname, 0, size);
+        i = 0;
+        while (++start != end)
+                hostname[i++] = *start;
+        ret = 0;
+out:
+        return ret;
+}
+
+int
+afr_local_pathinfo (char *pathinfo, gf_boolean_t *local)
+{
+        int             ret   = 0;
+        char            pathinfohost[1024] = {0};
+        char            localhost[1024] = {0};
+        xlator_t        *this = THIS;
+
+        *local = _gf_false;
+        ret = get_pathinfo_host (pathinfo, pathinfohost, sizeof (pathinfohost));
+        if (ret) {
+                gf_log (this->name, GF_LOG_ERROR, "Invalid pathinfo: %s",
+                        pathinfo);
+                goto out;
+        }
+
+        ret = gethostname (localhost, sizeof (localhost));
+        if (ret) {
+                gf_log (this->name, GF_LOG_ERROR, "gethostname() failed, "
+                        "reason: %s", strerror (errno));
+                goto out;
+        }
+
+        if (!strcmp (localhost, pathinfohost))
+                *local = _gf_true;
+out:
+        return ret;
+}
+
 int
 afr_crawl_build_start_loc (xlator_t *this, afr_crawl_data_t *crawl_data,
                            loc_t *dirloc)
@@ -683,6 +739,7 @@ afr_crawl_build_start_loc (xlator_t *this, afr_crawl_data_t *crawl_data,
         struct iatt   parent = {0};
         int           ret = 0;
         xlator_t      *readdir_xl = crawl_data->readdir_xl;
+        inode_t       *link_inode = NULL;
 
         priv = this->private;
         if (crawl_data->crawl == FULL) {
@@ -718,7 +775,8 @@ afr_crawl_build_start_loc (xlator_t *this, afr_crawl_data_t *crawl_data,
                         }
                         goto out;
                 }
-                inode_link (dirloc->inode, NULL, NULL, &iattr);
+                link_inode = inode_link (dirloc->inode, NULL, NULL, &iattr);
+                inode_unref (link_inode);
         }
         ret = 0;
 out:
@@ -833,10 +891,7 @@ _process_entries (xlator_t *this, loc_t *parentloc, gf_dirent_t *entries,
                 ret = crawl_data->process_entry (this, crawl_data, entry,
                                                  &entry_loc, parentloc, &iattr);
 
-                if (crawl_data->crawl == INDEX)
-                        continue;
-
-                if (ret || !IA_ISDIR (iattr.ia_type))
+                if (ret)
                         continue;
 
                 link_inode = inode_link (entry_loc.inode, NULL, NULL, &iattr);
@@ -846,7 +901,13 @@ _process_entries (xlator_t *this, loc_t *parentloc, gf_dirent_t *entries,
                         ret = -1;
                         goto out;
                 }
+                inode_unref (link_inode);
 
+                if (crawl_data->crawl == INDEX)
+                        continue;
+
+                if (!IA_ISDIR (iattr.ia_type))
+                        continue;
                 fd = NULL;
                 ret = afr_crawl_opendir (this, crawl_data, &fd, &entry_loc);
                 if (ret)

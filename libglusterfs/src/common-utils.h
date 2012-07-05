@@ -392,8 +392,36 @@ memdup (const void *ptr, size_t size)
 	return newptr;
 }
 
+typedef enum {
+        gf_timefmt_default = 0,
+        gf_timefmt_FT = 0,  /* YYYY-MM-DD hh:mm:ss */
+        gf_timefmt_Ymd_T,   /* YYYY/MM-DD-hh:mm:ss */
+        gf_timefmt_bdT,     /* ddd DD hh:mm:ss */
+        gf_timefmt_F_HMS,   /* YYYY-MM-DD hhmmss */
+        gf_timefmt_last
+} gf_timefmts;
+
+static inline void
+gf_time_fmt (char *dst, size_t sz_dst, time_t utime, unsigned int fmt)
+{
+        extern void _gf_timestuff (gf_timefmts *, const char ***, const char ***);
+        static gf_timefmts timefmt_last = (gf_timefmts) -1;
+        static const char **fmts;
+        static const char **zeros;
+        struct tm tm;
+
+        if (timefmt_last == -1)
+                _gf_timestuff (&timefmt_last, &fmts, &zeros);
+        if (timefmt_last < fmt) fmt = gf_timefmt_default;
+        if (gmtime_r (&utime, &tm) != NULL) {
+                strftime (dst, sz_dst, fmts[fmt], &tm);
+        } else {
+                strncpy (dst, zeros[fmt], sz_dst);
+        }
+}
+
 int
-mkdir_p (char *path, mode_t mode, gf_boolean_t allow_symlinks, int *start);
+mkdir_p (char *path, mode_t mode, gf_boolean_t allow_symlinks);
 /*
  * rounds up nr to power of two. If nr is already a power of two, just returns
  * nr
@@ -486,4 +514,5 @@ char *get_path_name (char *word, char **path);
 void gf_path_strip_trailing_slashes (char *path);
 uint64_t get_mem_size ();
 int gf_strip_whitespace (char *str, int len);
+int gf_canonicalize_path (char *path);
 #endif /* _COMMON_UTILS_H */

@@ -1108,6 +1108,7 @@ glusterd_store_read_and_tokenize (FILE *file, char *str,
                                   glusterd_store_op_errno_t *store_errno)
 {
         int32_t  ret = -1;
+        char *savetok = NULL;
 
         GF_ASSERT (file);
         GF_ASSERT (str);
@@ -1122,14 +1123,14 @@ glusterd_store_read_and_tokenize (FILE *file, char *str,
                 goto out;
         }
 
-        *iter_key = strtok (str, "=");
+        *iter_key = strtok_r (str, "=", &savetok);
         if (*iter_key == NULL) {
                 ret = -1;
                 *store_errno = GD_STORE_KEY_NULL;
                 goto out;
         }
 
-        *iter_val = strtok (NULL, "=");
+        *iter_val = strtok_r (NULL, "=", &savetok);
         if (*iter_key == NULL) {
                 ret = -1;
                 *store_errno = GD_STORE_VALUE_NULL;
@@ -1391,7 +1392,7 @@ glusterd_store_uuid ()
                 goto out;
         }
         ret = glusterd_store_save_value (handle->fd, GLUSTERD_STORE_UUID_KEY,
-                                         uuid_utoa (priv->uuid));
+                                         uuid_utoa (MY_UUID));
 
         if (ret) {
                 gf_log (this->name, GF_LOG_CRITICAL,
@@ -1491,6 +1492,7 @@ glusterd_store_iter_new (glusterd_store_handle_t  *shandle,
         }
 
         strncpy (tmp_iter->filepath, shandle->path, sizeof (tmp_iter->filepath));
+        tmp_iter->filepath[sizeof (tmp_iter->filepath) - 1] = 0;
         *iter = tmp_iter;
         ret = 0;
 
@@ -1759,19 +1761,38 @@ glusterd_store_retrieve_bricks (glusterd_volinfo_t *volinfo)
                         } else if (!strncmp (key, GLUSTERD_STORE_KEY_BRICK_PORT,
                                     strlen (GLUSTERD_STORE_KEY_BRICK_PORT))) {
                                 gf_string2int (value, &brickinfo->port);
-                                /* This is required to have proper ports
-                                   assigned to bricks after restart */
-                                pmap = pmap_registry_get (THIS);
-                                if (pmap->last_alloc <= brickinfo->port)
-                                        pmap->last_alloc = brickinfo->port + 1;
+
+                                if (brickinfo->port < GF_IANA_PRIV_PORTS_START){
+                                        /* This is required to adhere to the
+                                           IANA standards */
+                                        brickinfo->port = 0;
+                                } else {
+                                        /* This is required to have proper ports
+                                           assigned to bricks after restart */
+                                        pmap = pmap_registry_get (THIS);
+                                        if (pmap->last_alloc <= brickinfo->port)
+                                                pmap->last_alloc =
+                                                        brickinfo->port + 1;
+                                }
                         } else if (!strncmp (key, GLUSTERD_STORE_KEY_BRICK_RDMA_PORT,
                                     strlen (GLUSTERD_STORE_KEY_BRICK_RDMA_PORT))) {
                                 gf_string2int (value, &brickinfo->rdma_port);
-                                /* This is required to have proper ports
-                                   assigned to bricks after restart */
-                                pmap = pmap_registry_get (THIS);
-                                if (pmap->last_alloc <= brickinfo->rdma_port)
-                                        pmap->last_alloc = brickinfo->rdma_port + 1;
+
+                                if (brickinfo->rdma_port <
+                                    GF_IANA_PRIV_PORTS_START){
+                                        /* This is required to adhere to the
+                                           IANA standards */
+                                        brickinfo->rdma_port = 0;
+                                } else {
+                                        /* This is required to have proper ports
+                                           assigned to bricks after restart */
+                                        pmap = pmap_registry_get (THIS);
+                                        if (pmap->last_alloc <=
+                                            brickinfo->rdma_port)
+                                                pmap->last_alloc =
+                                                        brickinfo->rdma_port +1;
+                                }
+
                         } else if (!strncmp (key, GLUSTERD_STORE_KEY_BRICK_DECOMMISSIONED,
                                              strlen (GLUSTERD_STORE_KEY_BRICK_DECOMMISSIONED))) {
                                 gf_string2int (value, &brickinfo->decommissioned);

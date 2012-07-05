@@ -47,8 +47,10 @@
 
 #define AUTH_ALLOW_MAP_KEY "auth.allow"
 #define AUTH_REJECT_MAP_KEY "auth.reject"
+#define NFS_DISABLE_MAP_KEY "nfs.disable"
 #define AUTH_ALLOW_OPT_KEY "auth.addr.*.allow"
 #define AUTH_REJECT_OPT_KEY "auth.addr.*.reject"
+#define NFS_DISABLE_OPT_KEY "nfs.*.disable"
 
 
 /* dispatch table for VOLUME SET
@@ -117,9 +119,12 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"cluster.lookup-unhashed",              "cluster/distribute", NULL, NULL, NO_DOC, 0    },
         {"cluster.min-free-disk",                "cluster/distribute", NULL, NULL, NO_DOC, 0    },
         {"cluster.min-free-inodes",              "cluster/distribute", NULL, NULL, NO_DOC, 0    },
+        {"cluster.rebalance-stats",              "cluster/distribute", NULL, NULL, NO_DOC, 0    },
 
         {"cluster.entry-change-log",             "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
         {"cluster.read-subvolume",               "cluster/replicate",  NULL, NULL, NO_DOC, 0    },
+        {"cluster.read-subvolume-index",               "cluster/replicate",  NULL, NULL, NO_DOC, 0    },
+        {"cluster.read-hash-mode",               "cluster/replicate",  NULL, NULL, NO_DOC, 0},
         {"cluster.background-self-heal-count",   "cluster/replicate",  NULL, NULL, NO_DOC, 0    },
         {"cluster.metadata-self-heal",           "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
         {"cluster.data-self-heal",               "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
@@ -134,10 +139,11 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"cluster.eager-lock",                   "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
         {"cluster.quorum-type",                  "cluster/replicate",  "quorum-type", NULL, NO_DOC, 0},
         {"cluster.quorum-count",                 "cluster/replicate",  "quorum-count", NULL, NO_DOC, 0},
-        {"cluster.afr-fast-path",                "cluster/replicate",  "fast-path", NULL, NO_DOC, 0},
         {"cluster.hsrepl",                       "cluster/replicate",  "!hsrepl", NULL, NO_DOC, 0},
+        {"cluster.choose-local",                 "cluster/replicate",  NULL, NULL, DOC, 0},
 
         {"cluster.stripe-block-size",            "cluster/stripe",     "block-size", NULL, DOC, 0},
+	{"cluster.stripe-coalesce",		 "cluster/stripe",     "coalesce", NULL, DOC, 0},
 
         {VKEY_DIAG_LAT_MEASUREMENT,              "debug/io-stats",     "latency-measurement", "off", NO_DOC, 0},
         {"diagnostics.dump-fd-stats",            "debug/io-stats",     NULL, NULL, NO_DOC, 0},
@@ -155,12 +161,13 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"performance.cache-size",               "performance/io-cache",      NULL, NULL, NO_DOC, 0 },
         {"performance.cache-size",               "performance/quick-read",    NULL, NULL, NO_DOC, 0 },
         {"performance.flush-behind",             "performance/write-behind",  "flush-behind", NULL, DOC, 0},
+        {"performance.md-cache-timeout",         "performance/md-cache",      "md-cache-timeout", NULL, DOC, 0},
 
-        {"performance.io-thread-count",          "performance/io-threads",    "thread-count", DOC, 0},
-        {"performance.high-prio-threads",        "performance/io-threads",    NULL, DOC, 0},
-        {"performance.normal-prio-threads",      "performance/io-threads",    NULL, DOC, 0},
-        {"performance.low-prio-threads",         "performance/io-threads",    NULL, DOC, 0},
-        {"performance.least-prio-threads",       "performance/io-threads",    NULL, DOC, 0},
+        {"performance.io-thread-count",          "performance/io-threads",    "thread-count", NULL, DOC, 0},
+        {"performance.high-prio-threads",        "performance/io-threads",    NULL, NULL, DOC, 0},
+        {"performance.normal-prio-threads",      "performance/io-threads",    NULL, NULL, DOC, 0},
+        {"performance.low-prio-threads",         "performance/io-threads",    NULL, NULL, DOC, 0},
+        {"performance.least-prio-threads",       "performance/io-threads",    NULL, NULL, DOC, 0},
         {"performance.disk-usage-limit",         "performance/quota",         NULL, NULL, NO_DOC, 0},
         {"performance.min-free-disk-limit",      "performance/quota",         NULL, NULL, NO_DOC, 0},
         {"performance.write-behind-window-size", "performance/write-behind",  "cache-size", NULL, DOC},
@@ -216,8 +223,10 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"nfs.trusted-write",                    "nfs/server",                "!nfs3.*.trusted-write", NULL, DOC, 0},
         {"nfs.volume-access",                    "nfs/server",                "!nfs3.*.volume-access", NULL, DOC, 0},
         {"nfs.export-dir",                       "nfs/server",                "!nfs3.*.export-dir", NULL, DOC, 0},
-        {"nfs.disable",                          "nfs/server",                "!nfs-disable", NULL, DOC, 0},
+        {NFS_DISABLE_MAP_KEY,                    "nfs/server",                "!nfs-disable", NULL, DOC, 0},
         {"nfs.nlm",                              "nfs/server",                "nfs.nlm", NULL, GLOBAL_DOC, 0},
+        {"nfs.mount-udp",                        "nfs/server",                "nfs.mount-udp", NULL, GLOBAL_DOC, 0},
+        {"nfs.server-aux-gids",                  "nfs/server",                "nfs.server-aux-gids", NULL, NO_DOC, 0},
 
         {VKEY_FEATURES_QUOTA,                    "features/marker",           "quota", "off", NO_DOC, OPT_FLAG_FORCE},
         {VKEY_FEATURES_LIMIT_USAGE,              "features/quota",            "limit-set", NULL, NO_DOC, 0},
@@ -227,7 +236,8 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"features.lock-heal",                   "protocol/server",           "lk-heal", NULL, DOC, 0},
         {"features.grace-timeout",               "protocol/client",           "grace-timeout", NULL, NO_DOC, 0},
         {"features.grace-timeout",               "protocol/server",           "grace-timeout", NULL, DOC, 0},
-        {"feature.read-only",                    "features/read-only",        "!read-only", "off", DOC, 0},
+        {"features.read-only",                   "features/read-only",        "!read-only", "off", DOC, 0},
+        {"features.worm",                        "features/worm",             "!worm", "off", DOC, 0},
         {NULL,                                                                }
 };
 
@@ -1743,9 +1753,26 @@ server_graph_builder (volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
         if (ret)
                 return -1;
 
+        if (dict_get_str_boolean (set_dict, "features.read-only", 0) &&
+            dict_get_str_boolean (set_dict, "features.worm",0)) {
+                gf_log (THIS->name, GF_LOG_ERROR,
+                        "read-only and worm cannot be set together");
+                ret = -1;
+                goto out;
+        }
+
         /* Check for read-only volume option, and add it to the graph */
-        if (dict_get_str_boolean (set_dict, "feature.read-only", 0)) {
+        if (dict_get_str_boolean (set_dict, "features.read-only", 0)) {
                 xl = volgen_graph_add (graph, "features/read-only", volname);
+                if (!xl) {
+                        ret = -1;
+                        goto out;
+                }
+        }
+
+        /* Check for worm volume option, and add it to the graph */
+        if (dict_get_str_boolean (set_dict, "features.worm", 0)) {
+                xl = volgen_graph_add (graph, "features/worm", volname);
                 if (!xl) {
                         ret = -1;
                         goto out;
@@ -1995,6 +2022,8 @@ get_key_from_volopt ( struct volopt_map_entry *vme, char **key)
                 *key = gf_strdup (AUTH_ALLOW_OPT_KEY);
         else if (!strcmp (vme->key, AUTH_REJECT_MAP_KEY))
                 *key = gf_strdup (AUTH_REJECT_OPT_KEY);
+        else if (!strcmp (vme->key, NFS_DISABLE_MAP_KEY))
+                *key = gf_strdup (NFS_DISABLE_OPT_KEY);
         else {
                 if (vme->option) {
                         if  (vme->option[0] == '!') {
@@ -2098,7 +2127,8 @@ glusterd_get_volopt_content (gf_boolean_t xml_out)
                 }
 
                 if (!strcmp (key, AUTH_ALLOW_OPT_KEY) ||
-                    !strcmp (key, AUTH_REJECT_OPT_KEY))
+                    !strcmp (key, AUTH_REJECT_OPT_KEY) ||
+                    !strcmp (key, NFS_DISABLE_OPT_KEY))
                         GF_FREE (key);
         }
 
@@ -2403,7 +2433,6 @@ volgen_graph_build_dht_cluster (volgen_graph_t *graph,
         char                    *decommissioned_children = NULL;
         xlator_t                *dht                     = NULL;
 
-        GF_ASSERT (child_count > 1);
         clusters = volgen_graph_build_clusters (graph,  volinfo,
                                                 "cluster/distribute", "%s-dht",
                                                 child_count, child_count);
@@ -2496,12 +2525,16 @@ volume_volgen_graph_build_clusters (volgen_graph_t *graph,
 
 build_distribute:
         dist_count = volinfo->brick_count / volinfo->dist_leaf_count;
-        if (dist_count > 1) {
-                ret = volgen_graph_build_dht_cluster (graph, volinfo,
-                                                      dist_count);
-                if (ret)
-                        goto out;
+        if (!dist_count) {
+                ret = -1;
+                goto out;
         }
+
+        ret = volgen_graph_build_dht_cluster (graph, volinfo,
+                                              dist_count);
+        if (ret)
+                goto out;
+
         ret = 0;
 out:
         return ret;
@@ -2731,6 +2764,10 @@ nfs_option_handler (volgen_graph_t *graph,
                                         volinfo->volname);
 
                 if (ret != -1) {
+                        ret = gf_canonicalize_path (vme->value);
+                        if (ret)
+                                return -1;
+
                         ret = xlator_set_option (xl, aa, vme->value);
                         GF_FREE (aa);
                 }
@@ -2822,6 +2859,7 @@ build_shd_graph (volgen_graph_t *graph, dict_t *mod_dict)
         xlator_t           *iostxl        = NULL;
         int                rclusters      = 0;
         int                replica_count  = 0;
+        gf_boolean_t       graph_check    = _gf_false;
 
         this = THIS;
         priv = this->private;
@@ -2832,6 +2870,7 @@ build_shd_graph (volgen_graph_t *graph, dict_t *mod_dict)
                 goto out;
         }
 
+        graph_check = dict_get_str_boolean (mod_dict, "graph-check", 0);
         iostxl = volgen_graph_add_as (graph, "debug/io-stats", "glustershd");
         if (!iostxl) {
                 ret = -1;
@@ -2839,7 +2878,8 @@ build_shd_graph (volgen_graph_t *graph, dict_t *mod_dict)
         }
 
         list_for_each_entry (voliter, &priv->volumes, vol_list) {
-                if (voliter->status != GLUSTERD_STATUS_STARTED)
+                if (!graph_check &&
+                   (voliter->status != GLUSTERD_STATUS_STARTED))
                         continue;
 
                 if (!glusterd_is_volume_replicate (voliter))
@@ -3395,6 +3435,14 @@ glusterd_create_shd_volfile ()
         if (ret)
                 goto out;
 
+        ret = dict_set_str (mod_dict, "cluster.metadata-self-heal", "on");
+        if (ret)
+                goto out;
+
+        ret = dict_set_str (mod_dict, "cluster.entry-self-heal", "on");
+        if (ret)
+                goto out;
+
         glusterd_get_nodesvc_volfile ("glustershd", conf->workdir,
                                       filepath, sizeof (filepath));
         ret = glusterd_create_global_volfile (build_shd_graph, filepath,
@@ -3485,6 +3533,13 @@ validate_shdopts (glusterd_volinfo_t *volinfo,
 
         graph.errstr = op_errstr;
 
+        if (!glusterd_is_volume_replicate (volinfo)) {
+                ret = 0;
+                goto out;
+        }
+        ret = dict_set_str (val_dict, "graph-check", "on");
+        if (ret)
+                goto out;
         ret = build_shd_graph (&graph, val_dict);
         if (!ret)
                 ret = graph_reconf_validateopt (&graph.graph, op_errstr);
@@ -3492,6 +3547,8 @@ validate_shdopts (glusterd_volinfo_t *volinfo,
         volgen_graph_free (&graph);
 
         gf_log ("glusterd", GF_LOG_DEBUG, "Returning %d", ret);
+out:
+        dict_del (val_dict, "graph-check");
         return ret;
 }
 

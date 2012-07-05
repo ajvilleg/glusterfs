@@ -57,15 +57,6 @@ typedef struct glusterd_voldict_ctx_ {
         char    *val_name;
 } glusterd_voldict_ctx_t;
 
-/* Moved the definition from gluster-utils.c avoiding
- * extern'ing in multiple places.
- * (Indeed, XXX: we'd rather need a general
- * "mkdir -p" like routine in libglusterfs)
-*/
-
-int
-mkdir_if_missing (char *path, gf_boolean_t *new);
-
 int
 glusterd_compare_lines (const void *a, const void *b);
 
@@ -203,6 +194,9 @@ glusterd_shd_start ();
 
 int32_t
 glusterd_shd_stop ();
+
+void
+glusterd_set_socket_filepath (char *sock_filepath, char *sockpath, size_t len);
 
 int32_t
 glusterd_nodesvc_set_socket_filepath (char *rundir, uuid_t uuid,
@@ -451,4 +445,6 @@ glusterd_defrag_volume_status_update (glusterd_volinfo_t *volinfo,
 int
 glusterd_check_files_identical (char *filename1, char *filename2,
                                 gf_boolean_t *identical);
+void
+glusterd_volinfo_reset_defrag_stats (glusterd_volinfo_t *volinfo);
 #endif

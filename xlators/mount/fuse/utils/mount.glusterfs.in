@@ -41,8 +41,8 @@ _init ()
         mounttab=/proc/mounts
         ;;
     Linux)
-        getinode="stat -c $i"
-        getdev="stat -c $d"
+        getinode="stat -c %i $i"
+        getdev="stat -c %d $d"
         lgetinode="${getinode} -L"
         lgetdev="${getdev} -L"
 
@@ -55,40 +55,12 @@ _init ()
     export LD_LIBRARY_PATH
 }
 
-# Mount happens asynchronously, so the command status alone will never be
-# sufficient.  Instead, we have to wait for multiple events representing
-# different possible outcomes.
-wait_for ()
-{
-    local daemon_pid=$1
-    local mount_point=$2
-
-    waited=0
-    while true; do
-        kill -s 0 $daemon_pid
-        if [ $? != 0 ]; then
-                echo "Gluster client daemon exited unexpectedly."
-                umount $mount_point &> /dev/null
-                exit 1
-        fi
-        inode=$( ${getinode} $mount_point 2>/dev/null);
-        if [ "$inode" = "1" ]; then
-            break
-        fi
-        if [ $waited -ge 10 ]; then
-            break
-        fi
-        sleep 1
-        waited=$((waited+1))
-    done
-
-    echo "$inode"
-}
-
 start_glusterfs ()
 {
+    # lets the comparsion be case insensitive for all strings
+
     if [ -n "$log_level_str" ]; then
-	case "$log_level_str" in
+	case "$( echo $log_level_str | tr '[a-z]' '[A-Z]')" in
 	    "ERROR")
 		log_level=$LOG_ERROR;
 		;;
@@ -128,6 +100,10 @@ start_glusterfs ()
 	cmd_line=$(echo "$cmd_line --acl");
     fi
 
+    if [ -n "$selinux" ]; then
+	cmd_line=$(echo "$cmd_line --selinux");
+    fi
+
     if [ -n "$worm" ]; then
         cmd_line=$(echo "$cmd_line --worm");
     fi
@@ -148,6 +124,18 @@ start_glusterfs ()
         cmd_line=$(echo "$cmd_line --volume-name=$volume_name");
     fi
 
+    if [ -n "$attribute_timeout" ]; then
+        cmd_line=$(echo "$cmd_line --attribute-time=$attribute_timeout");
+    fi
+
+    if [ -n "$entry_timeout" ]; then
+        cmd_line=$(echo "$cmd_line --entry-timeout=$entry_timeout");
+    fi
+
+    # for rdma volume, we have to fetch volfile with '.rdma' added
+    # to volume name, so that it fetches the right client vol file
+    volume_id_rdma="";
+
     if [ -z "$volfile_loc" ]; then
         if  [ -n "$server_ip" ]; then
             if [ -n "$server_port" ]; then
@@ -155,8 +143,14 @@ start_glusterfs ()
             fi
 	    if [ -n "$transport" ]; then
                 cmd_line=$(echo "$cmd_line --volfile-server-transport=$transport");
+                if [ "$transport" = "rdma" ]; then
+                    volume_id_rdma=".rdma";
+                fi
             fi
             if [ -n "$volume_id" ]; then
+                if [ -n "$volume_id_rdma" ]; then
+                    volume_id="$volume_id$volume_id_rdma";
+                fi
                 cmd_line=$(echo "$cmd_line --volfile-id=$volume_id");
             fi
 
@@ -172,33 +166,34 @@ start_glusterfs ()
         cmd_line=$(echo "$cmd_line --volfile=$volfile_loc");
     fi
 
-    cmd_line=$(echo "$cmd_line $mount_point")
-    err=0
-    $cmd_line
-    daemon_pid=$$
+    cmd_line=$(echo "$cmd_line $mount_point");
+    err=0;
+    $cmd_line;
 
-    # Wait for the inode to change *or* for the daemon to exit (indicating a
-    # problem with the mount).
-    inode=$(wait_for $daemon_pid $mount_point)
+
+    inode=$( ${getinode} $mount_point 2>/dev/null);
+
     # this is required if the stat returns error
     if [ -z "$inode" ]; then
-        inode="0"
+        inode="0";
     fi
 
     # retry the failover
+    # if [ $? != "0" ]; then # <--- TODO: Once glusterfs returns proper error code, change it.
     if [ $inode -ne 1 ]; then
+        err=1;
         if [ -n "$cmd_line1" ]; then
             cmd_line1=$(echo "$cmd_line1 $mount_point");
-            $cmd_line1
-            daemon_pid=$$
+            $cmd_line1;
+            err=0;
 
-            inode=$(wait_for $daemon_pid $mount_point)
+            inode=$( ${getinode} $mount_point 2>/dev/null);
             # this is required if the stat returns error
             if [ -z "$inode" ]; then
                 inode="0";
             fi
             if [ $inode -ne 1 ]; then
-                err=1
+                err=1;
             fi
         fi
     fi
@@ -247,7 +242,7 @@ check_recursive_mount ()
     fi
 
     # check if the mount point is a brick's parent directory
-    GLUSTERD_WORKDIR="/etc/glusterd";
+    GLUSTERD_WORKDIR="/var/lib/glusterd";
 
     ls -L "$GLUSTERD_WORKDIR"/vols/*/bricks/* > /dev/null 2>&1;
     if [ $? -ne 0 ]; then
@@ -276,7 +271,7 @@ check_recursive_mount ()
                 tmp_brick="$brick";
                 brick="$brick"/..;
                 brick_dev=`${lgetdev} $brick`;
-                brick_inode=`${gletdev} $brick`;
+                brick_inode=`${lgetinode} $brick`;
                 if [ "$mnt_inode" -eq "$brick_inode" -a "$mnt_dev" -eq "$brick_dev" ]; then
                     echo ERROR: $mnt_dir is a parent of the brick $tmp_brick;
                     exit 2;
@@ -300,11 +295,14 @@ main ()
                 case "$pair" in
                     "ro")       read_only=1 ;;
                     "acl")      acl=1 ;;
+                    "selinux")  selinux=1 ;;
                     "worm")     worm=1 ;;
                     # "mount -t glusterfs" sends this, but it's useless.
                     "rw")       ;;
                     *)
-                        (echo "$pair" | tr "=" " ")|read key value
+                        key=$(echo "$pair" | cut -f1 -d'=');
+                        value=$(echo "$pair" | cut -f2- -d'=');
+
                         # Handle options with values.
                         case "$key" in
                             "log-level")        log_level_str=$value ;;
@@ -319,6 +317,9 @@ main ()
                                 volfile_max_fetch_attempts=$value ;;
                             "backupvolfile-server")
                                 backupvolfile_server=$value ;;
+                            "attribute-timeout")
+                                attribute_timeout=$value ;;
+                            "entry-timeout")    entry_timeout=$value ;;
                             *) echo "unknown option $key (ignored)" ;;
                         esac
                 esac

@@ -48,6 +48,7 @@
 #include <rpc/pmap_clnt.h>
 #include <rpc/rpc.h>
 #include <rpc/xdr.h>
+#include <statedump.h>
 
 /* TODO:
  * 1) 2 opens racing .. creating an fd leak.
@@ -336,8 +337,6 @@ nlm_set_rpc_clnt (rpc_clnt_t *rpc_clnt, char *caller_name)
         nlm_client_t *nlmclnt = NULL;
         int nlmclnt_found = 0;
         int ret = -1;
-        rpc_clnt_t *rpc_clnt_old = NULL;
-        char *old_name = NULL;
 
         LOCK (&nlm_client_list_lk);
         list_for_each_entry (nlmclnt, &nlm_client_list, nlm_clients) {
@@ -350,34 +349,23 @@ nlm_set_rpc_clnt (rpc_clnt_t *rpc_clnt, char *caller_name)
                 nlmclnt = GF_CALLOC (1, sizeof(*nlmclnt),
                                      gf_nfs_mt_nlm4_nlmclnt);
                 if (nlmclnt == NULL) {
-                        gf_log (GF_NLM, GF_LOG_DEBUG, "malloc error");
+                        gf_log (GF_NLM, GF_LOG_ERROR, "mem-alloc error");
                         goto ret;
                 }
 
                 INIT_LIST_HEAD(&nlmclnt->fdes);
                 INIT_LIST_HEAD(&nlmclnt->nlm_clients);
+                INIT_LIST_HEAD(&nlmclnt->shares);
 
                 list_add (&nlmclnt->nlm_clients, &nlm_client_list);
+                nlmclnt->caller_name = gf_strdup (caller_name);
         }
-        rpc_clnt_old = nlmclnt->rpc_clnt;
-        old_name = nlmclnt->caller_name;
-        if (rpc_clnt)
+        if (nlmclnt->rpc_clnt == NULL) {
                 nlmclnt->rpc_clnt = rpc_clnt_ref (rpc_clnt);
-        nlmclnt->caller_name = gf_strdup (caller_name);
-
+        }
         ret = 0;
 ret:
         UNLOCK (&nlm_client_list_lk);
-
-        if (rpc_clnt_old) {
-                /* cleanup the saved-frames before last unref */
-                rpc_clnt_connection_cleanup (&rpc_clnt_old->conn);
-
-                rpc_clnt_unref (rpc_clnt_old);
-        }
-
-        if (old_name)
-                GF_FREE (old_name);
         return ret;
 }
 
@@ -612,9 +600,7 @@ nlm4_file_open_and_resume(nfs3_call_state_t *cs, nlm4_resume_fn_t resume)
         nlmclnt = nlm_get_uniq (cs->args.nlm4_lockargs.alock.caller_name);
         if (nlmclnt == NULL) {
                 gf_log (GF_NLM, GF_LOG_ERROR, "nlm_get_uniq() returned NULL");
-                cs->resolve_ret = -1;
-                cs->resume_fn(cs);
-                ret = -1;
+                ret = -ENOLCK;
                 goto err;
         }
         cs->resume_fn = resume;
@@ -630,19 +616,28 @@ nlm4_file_open_and_resume(nfs3_call_state_t *cs, nlm4_resume_fn_t resume)
         fd = fd_create_uint64 (cs->resolvedloc.inode, (uint64_t)nlmclnt);
         if (fd == NULL) {
                 gf_log (GF_NLM, GF_LOG_ERROR, "fd_create_uint64() returned NULL");
-                cs->resolve_ret = -1;
-                cs->resume_fn(cs);
-                ret = -1;
+                ret = -ENOLCK;
                 goto err;
         }
 
         cs->fd = fd;
 
         frame = create_frame (cs->nfsx, cs->nfsx->ctx->pool);
+        if (!frame) {
+                gf_log (GF_NLM, GF_LOG_ERROR, "unable to create frame");
+                ret = -ENOMEM;
+                goto err;
+        }
+
         frame->root->pid = NFS_PID;
         frame->root->uid = 0;
         frame->root->gid = 0;
         frame->local = cs;
+        /*
+         * This is the only place that we call STACK_WIND without nfs_fix_groups,
+         * because in this particular case the relevant identify is in lk_owner and
+         * we don't care about the fields that nfs_fix_groups would set up.
+         */
         STACK_WIND_COOKIE (frame, nlm4_file_open_cbk, cs->vol, cs->vol,
                           cs->vol->fops->open, &cs->resolvedloc, O_RDWR,
                           cs->fd, NULL);
@@ -768,7 +763,6 @@ err:
 int
 nlm4_test_fd_resume (void *carg)
 {
-        nlm4_stats                      stat = nlm4_denied;
         int                             ret = -EFAULT;
         nfs_user_t                      nfu = {0, };
         nfs3_call_state_t               *cs = NULL;
@@ -778,21 +772,12 @@ nlm4_test_fd_resume (void *carg)
                 return ret;
 
         cs = (nfs3_call_state_t *)carg;
-        nlm4_check_fh_resolve_status (cs, stat, nlm4err);
         nfs_request_user_init (&nfu, cs->req);
         nlm4_lock_to_gf_flock (&flock, &cs->args.nlm4_testargs.alock,
                                cs->args.nlm4_testargs.exclusive);
         nlm_copy_lkowner (&nfu.lk_owner, &cs->args.nlm4_testargs.alock.oh);
         ret = nfs_lk (cs->nfsx, cs->vol, &nfu, cs->fd, F_GETLK, &flock,
                       nlm4svc_test_cbk, cs);
-        if (ret < 0)
-                stat = nlm4_errno_to_nlm4stat (-ret);
-nlm4err:
-        if (ret < 0) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "Unable to call lk()");
-                nlm4_test_reply (cs, stat, &flock);
-                nfs3_call_state_wipe (cs);
-        }
 
         return ret;
 }
@@ -812,14 +797,15 @@ nlm4_test_resume (void *carg)
         cs = (nfs3_call_state_t *)carg;
         nlm4_check_fh_resolve_status (cs, stat, nlm4err);
         fd = fd_anonymous (cs->resolvedloc.inode);
+        if (!fd)
+                goto nlm4err;
         cs->fd = fd;
         ret = nlm4_test_fd_resume (cs);
-        if (ret < 0)
-                stat = nlm4_errno_to_nlm4stat (-ret);
 
 nlm4err:
         if (ret < 0) {
                 gf_log (GF_NLM, GF_LOG_ERROR, "unable to open_and_resume");
+                stat = nlm4_errno_to_nlm4stat (-ret);
                 nlm4_test_reply (cs, stat, NULL);
                 nfs3_call_state_wipe (cs);
         }
@@ -880,9 +866,9 @@ nlm4err:
         }
 
 rpcerr:
-        if (ret < 0) {
+        if (ret < 0)
                 nfs3_call_state_wipe (cs);
-        }
+
         return ret;
 }
 
@@ -1337,7 +1323,6 @@ nlm4_lock_fd_resume (void *carg)
 
         cs = (nfs3_call_state_t *)carg;
         nlm4_check_fh_resolve_status (cs, stat, nlm4err);
-
         (void) nlm_search_and_add (cs->fd,
                                    cs->args.nlm4_lockargs.alock.caller_name);
         nfs_request_user_init (&nfu, cs->req);
@@ -1349,14 +1334,17 @@ nlm4_lock_fd_resume (void *carg)
                                     nlm4_blocked);
                 ret = nfs_lk (cs->nfsx, cs->vol, &nfu, cs->fd, F_SETLKW,
                               &flock, nlm4svc_lock_cbk, cs);
+                /* FIXME: handle error from nfs_lk() specially  by just
+                 * cleaning up cs and unblock the client lock request.
+                 */
+                ret = 0;
         } else
                 ret = nfs_lk (cs->nfsx, cs->vol, &nfu, cs->fd, F_SETLK,
                               &flock, nlm4svc_lock_cbk, cs);
 
-        if (ret < 0)
-                stat = nlm4_errno_to_nlm4stat (-ret);
 nlm4err:
         if (ret < 0) {
+                stat = nlm4_errno_to_nlm4stat (-ret);
                 gf_log (GF_NLM, GF_LOG_ERROR, "unable to call lk()");
                 nlm4_generic_reply (cs->req, cs->args.nlm4_lockargs.cookie,
                                     stat);
@@ -1380,12 +1368,11 @@ nlm4_lock_resume (void *carg)
         cs = (nfs3_call_state_t *)carg;
         nlm4_check_fh_resolve_status (cs, stat, nlm4err);
         ret = nlm4_file_open_and_resume (cs, nlm4_lock_fd_resume);
-        if (ret < 0)
-                stat = nlm4_errno_to_nlm4stat (-ret);
 
 nlm4err:
         if (ret < 0) {
                 gf_log (GF_NLM, GF_LOG_ERROR, "unable to open and resume");
+                stat = nlm4_errno_to_nlm4stat (-ret);
                 nlm4_generic_reply (cs->req, cs->args.nlm4_lockargs.cookie,
                                     stat);
                 nfs3_call_state_wipe (cs);
@@ -1497,7 +1484,6 @@ err:
 int
 nlm4_cancel_fd_resume (void *carg)
 {
-        nlm4_stats                      stat = nlm4_denied;
         int                             ret = -EFAULT;
         nfs_user_t                      nfu = {0, };
         nfs3_call_state_t               *cs = NULL;
@@ -1507,7 +1493,6 @@ nlm4_cancel_fd_resume (void *carg)
                 return ret;
 
         cs = (nfs3_call_state_t *)carg;
-        nlm4_check_fh_resolve_status (cs, stat, nlm4err);
         nfs_request_user_init (&nfu, cs->req);
         nlm4_lock_to_gf_flock (&flock, &cs->args.nlm4_cancargs.alock,
                                 cs->args.nlm4_cancargs.exclusive);
@@ -1516,74 +1501,6 @@ nlm4_cancel_fd_resume (void *carg)
         ret = nfs_lk (cs->nfsx, cs->vol, &nfu, cs->fd, F_SETLK,
                       &flock, nlm4svc_cancel_cbk, cs);
 
-        if (ret < 0)
-                stat = nlm4_errno_to_nlm4stat (-ret);
-nlm4err:
-        if (ret < 0) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "unable to call lk()");
-                nlm4_generic_reply (cs->req, cs->args.nlm4_cancargs.cookie,
-                                    stat);
-                nfs3_call_state_wipe (cs);
-        }
-
-        return ret;
-}
-
-int
-nlm4svc_unlock_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
-                    int32_t op_ret, int32_t op_errno, struct gf_flock *flock,
-                    dict_t *xdata)
-{
-        nlm4_stats                      stat = nlm4_denied;
-        nfs3_call_state_t              *cs = NULL;
-
-        cs = frame->local;
-        if (op_ret == -1) {
-                stat = nlm4_errno_to_nlm4stat (op_errno);
-                goto err;
-        } else {
-                stat = nlm4_granted;
-                if (flock->l_type == F_UNLCK)
-                        nlm_search_and_delete (cs->fd,
-                                               cs->args.nlm4_unlockargs.alock.caller_name);
-        }
-
-err:
-        nlm4_generic_reply (cs->req, cs->args.nlm4_unlockargs.cookie, stat);
-        nfs3_call_state_wipe (cs);
-        return 0;
-}
-
-int
-nlm4_unlock_fd_resume (void *carg)
-{
-        nlm4_stats                      stat = nlm4_denied;
-        int                             ret = -EFAULT;
-        nfs_user_t                      nfu = {0, };
-        nfs3_call_state_t               *cs = NULL;
-        struct gf_flock                 flock = {0, };
-
-        if (!carg)
-                return ret;
-        cs = (nfs3_call_state_t *)carg;
-        nlm4_check_fh_resolve_status (cs, stat, nlm4err);
-        nfs_request_user_init (&nfu, cs->req);
-        nlm4_lock_to_gf_flock (&flock, &cs->args.nlm4_unlockargs.alock, 0);
-        nlm_copy_lkowner (&nfu.lk_owner, &cs->args.nlm4_unlockargs.alock.oh);
-        flock.l_type = F_UNLCK;
-        ret = nfs_lk (cs->nfsx, cs->vol, &nfu, cs->fd, F_SETLK,
-                      &flock, nlm4svc_unlock_cbk, cs);
-
-        if (ret < 0)
-                stat = nlm4_errno_to_nlm4stat (-ret);
-nlm4err:
-        if (ret < 0) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "unable to call lk()");
-                nlm4_generic_reply (cs->req, cs->args.nlm4_unlockargs.cookie,
-                                    stat);
-                nfs3_call_state_wipe (cs);
-        }
-
         return ret;
 }
 
@@ -1591,7 +1508,7 @@ int
 nlm4_cancel_resume (void *carg)
 {
         nlm4_stats                      stat = nlm4_failed;
-        int                             ret = -1;
+        int                             ret = -EFAULT;
         nfs3_call_state_t               *cs = NULL;
         nlm_client_t                    *nlmclnt = NULL;
 
@@ -1608,20 +1525,22 @@ nlm4_cancel_resume (void *carg)
         }
         cs->fd = fd_lookup_uint64 (cs->resolvedloc.inode, (uint64_t)nlmclnt);
         if (cs->fd == NULL) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "nlm_get_uniq() returned NULL");
+                gf_log (GF_NLM, GF_LOG_ERROR, "fd_lookup_uint64 retrned NULL");
                 goto nlm4err;
         }
         ret = nlm4_cancel_fd_resume (cs);
 
 nlm4err:
         if (ret < 0) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "unable to unlock_fd_resume()");
+                gf_log (GF_NLM, GF_LOG_WARNING, "unable to unlock_fd_resume()");
+                stat = nlm4_errno_to_nlm4stat (-ret);
                 nlm4_generic_reply (cs->req, cs->args.nlm4_cancargs.cookie,
                                     stat);
+
                 nfs3_call_state_wipe (cs);
         }
-
-        return ret;
+        /* clean up is taken care of */
+        return 0;
 }
 
 int
@@ -1685,6 +1604,52 @@ rpcerr:
 }
 
 int
+nlm4svc_unlock_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+                    int32_t op_ret, int32_t op_errno, struct gf_flock *flock,
+                    dict_t *xdata)
+{
+        nlm4_stats                      stat = nlm4_denied;
+        nfs3_call_state_t              *cs = NULL;
+
+        cs = frame->local;
+        if (op_ret == -1) {
+                stat = nlm4_errno_to_nlm4stat (op_errno);
+                goto err;
+        } else {
+                stat = nlm4_granted;
+                if (flock->l_type == F_UNLCK)
+                        nlm_search_and_delete (cs->fd,
+                                               cs->args.nlm4_unlockargs.alock.caller_name);
+        }
+
+err:
+        nlm4_generic_reply (cs->req, cs->args.nlm4_unlockargs.cookie, stat);
+        nfs3_call_state_wipe (cs);
+        return 0;
+}
+
+int
+nlm4_unlock_fd_resume (void *carg)
+{
+        int                             ret = -EFAULT;
+        nfs_user_t                      nfu = {0, };
+        nfs3_call_state_t               *cs = NULL;
+        struct gf_flock                 flock = {0, };
+
+        if (!carg)
+                return ret;
+        cs = (nfs3_call_state_t *)carg;
+        nfs_request_user_init (&nfu, cs->req);
+        nlm4_lock_to_gf_flock (&flock, &cs->args.nlm4_unlockargs.alock, 0);
+        nlm_copy_lkowner (&nfu.lk_owner, &cs->args.nlm4_unlockargs.alock.oh);
+        flock.l_type = F_UNLCK;
+        ret = nfs_lk (cs->nfsx, cs->vol, &nfu, cs->fd, F_SETLK,
+                      &flock, nlm4svc_unlock_cbk, cs);
+
+        return ret;
+}
+
+int
 nlm4_unlock_resume (void *carg)
 {
         nlm4_stats                      stat = nlm4_failed;
@@ -1700,26 +1665,30 @@ nlm4_unlock_resume (void *carg)
 
         nlmclnt = nlm_get_uniq (cs->args.nlm4_unlockargs.alock.caller_name);
         if (nlmclnt == NULL) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "nlm_get_uniq() returned NULL");
+                stat = nlm4_granted;
+                gf_log (GF_NLM, GF_LOG_WARNING, "nlm_get_uniq() returned NULL");
                 goto nlm4err;
         }
         cs->fd = fd_lookup_uint64 (cs->resolvedloc.inode, (uint64_t)nlmclnt);
         if (cs->fd == NULL) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "fd_lookup_uint64() returned NULL");
+                stat = nlm4_granted;
+                gf_log (GF_NLM, GF_LOG_WARNING, "fd_lookup_uint64() returned "
+                        "NULL");
                 goto nlm4err;
         }
         ret = nlm4_unlock_fd_resume (cs);
 
 nlm4err:
         if (ret < 0) {
-                gf_log (GF_NLM, GF_LOG_ERROR, "unable to unlock_fd_resume");
+                gf_log (GF_NLM, GF_LOG_WARNING, "unable to unlock_fd_resume");
+                stat = nlm4_errno_to_nlm4stat (-ret);
                 nlm4_generic_reply (cs->req, cs->args.nlm4_unlockargs.cookie,
                                     stat);
 
                 nfs3_call_state_wipe (cs);
         }
-
-        return ret;
+        /* we have already taken care of cleanup */
+        return 0;
 }
 
 int
@@ -1762,6 +1731,7 @@ nlm4svc_unlock (rpcsvc_request_t *req)
         }
 
         cs->vol = vol;
+        /* FIXME: check if trans is being used at all for unlock */
         cs->trans = rpcsvc_request_transport_ref(req);
         nlm4_volume_started_check (nfs3, vol, ret, rpcerr);
 
@@ -2352,6 +2322,8 @@ nlm4svc_init(xlator_t *nfsx)
         char *portstr = NULL;
         pthread_t thr;
         struct timeval timeout = {0,};
+        FILE   *pidfile = NULL;
+        pid_t   pid     = -1;
 
         nfs = (struct nfs_state*)nfsx->private;
 
@@ -2418,8 +2390,26 @@ nlm4svc_init(xlator_t *nfsx)
          * Need to figure out a more graceful way
          * killall will cause problems on solaris.
          */
-        ret = runcmd ("killall", "-9", "rpc.statd", NULL);
-        /* if ret == -1, do nothing - case statd was not already running  */
+
+        pidfile = fopen ("/var/run/rpc.statd.pid", "r");
+        if (pidfile) {
+                ret = fscanf (pidfile, "%d", &pid);
+                if (ret <= 0) {
+                        gf_log (GF_NLM, GF_LOG_WARNING, "unable to get pid of "
+                                "rpc.statd");
+                        ret = runcmd ("killall", "-9", "rpc.statd", NULL);
+                } else
+                        kill (pid, SIGKILL);
+
+                fclose (pidfile);
+        } else {
+                gf_log (GF_NLM, GF_LOG_WARNING, "opening the pid file of "
+                        "rpc.statd failed (%s)", strerror (errno));
+                /* if ret == -1, do nothing - case either statd was not
+                 * running or was running in valgrind mode
+                 */
+                ret = runcmd ("killall", "-9", "rpc.statd", NULL);
+        }
 
         ret = unlink ("/var/run/rpc.statd.pid");
         if (ret == -1 && errno != ENOENT) {
@@ -2439,4 +2429,45 @@ nlm4svc_init(xlator_t *nfsx)
         return &nlm4prog;
 err:
         return NULL;
+}
+
+int32_t
+nlm_priv (xlator_t *this)
+{
+        int32_t                  ret                       = -1;
+        uint32_t                 client_count              = 0;
+        uint64_t                 file_count                = 0;
+        nlm_client_t            *client                    = NULL;
+        nlm_fde_t               *fde                       = NULL;
+        char                     key[GF_DUMP_MAX_BUF_LEN]  = {0};
+        char                     gfid_str[64]              = {0};
+
+        gf_proc_dump_add_section("nfs.nlm");
+
+        LOCK (&nlm_client_list_lk);
+
+        list_for_each_entry (client, &nlm_client_list, nlm_clients) {
+
+                gf_proc_dump_build_key (key, "client", "%d.hostname", client_count);
+                gf_proc_dump_write (key, "%s\n", client->caller_name);
+
+                file_count = 0;
+                list_for_each_entry (fde, &client->fdes, fde_list) {
+                        gf_proc_dump_build_key (key, "file", "%ld.gfid", file_count);
+                        memset (gfid_str, 0, 64);
+                        uuid_utoa_r (fde->fd->inode->gfid, gfid_str);
+                        gf_proc_dump_write (key, "%s", gfid_str);
+                        file_count++;
+                }
+
+                gf_proc_dump_build_key (key, "client", "files-locked");
+                gf_proc_dump_write (key, "%ld\n", file_count);
+                client_count++;
+        }
+
+        gf_proc_dump_build_key (key, "nlm", "client-count");
+        gf_proc_dump_write (key, "%d", client_count);
+
+        UNLOCK (&nlm_client_list_lk);
+        return ret;
 }

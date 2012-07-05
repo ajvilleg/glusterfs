@@ -79,23 +79,21 @@ glusterd_opinfo_init ()
         return ret;
 }
 
-static int
-glusterd_uuid_init (int flag)
+int
+glusterd_uuid_init ()
 {
         int             ret = -1;
         glusterd_conf_t *priv = NULL;
 
         priv = THIS->private;
 
-        if (!flag) {
-                ret = glusterd_retrieve_uuid ();
-                if (!ret) {
-                        uuid_copy (glusterd_uuid, priv->uuid);
-                        gf_log ("glusterd", GF_LOG_INFO,
-                                "retrieved UUID: %s", uuid_utoa (priv->uuid));
-                        return 0;
-                }
-        }
+	ret = glusterd_retrieve_uuid ();
+	if (ret == 0) {
+		uuid_copy (glusterd_uuid, priv->uuid);
+		gf_log ("glusterd", GF_LOG_INFO,
+			"retrieved UUID: %s", uuid_utoa (priv->uuid));
+		return 0;
+	}
 
         uuid_generate (glusterd_uuid);
 
@@ -344,7 +342,7 @@ glusterd_crt_georep_folders (char *georepdir, glusterd_conf_t *conf)
         }
 
         snprintf (georepdir, PATH_MAX, "%s/"GEOREP, conf->workdir);
-        ret = mkdir_if_missing (georepdir, NULL);
+        ret = mkdir_p (georepdir, 0777, _gf_true);
         if (-1 == ret) {
                 gf_log ("glusterd", GF_LOG_CRITICAL,
                         "Unable to create "GEOREP" directory %s",
@@ -359,7 +357,7 @@ glusterd_crt_georep_folders (char *georepdir, glusterd_conf_t *conf)
                         georepdir);
                 goto out;
         }
-        ret = mkdir_if_missing (DEFAULT_LOG_FILE_DIRECTORY"/"GEOREP, NULL);
+        ret = mkdir_p (DEFAULT_LOG_FILE_DIRECTORY"/"GEOREP, 0777, _gf_true);
         if (-1 == ret) {
                 gf_log ("glusterd", GF_LOG_CRITICAL,
                         "Unable to create "GEOREP" log directory");
@@ -373,8 +371,8 @@ glusterd_crt_georep_folders (char *georepdir, glusterd_conf_t *conf)
                         georepdir);
                 goto out;
         }
-        ret = mkdir_if_missing (DEFAULT_LOG_FILE_DIRECTORY"/"GEOREP"-slaves",
-                                NULL);
+        ret = mkdir_p (DEFAULT_LOG_FILE_DIRECTORY"/"GEOREP"-slaves", 0777,
+                      _gf_true);
         if (-1 == ret) {
                 gf_log ("glusterd", GF_LOG_CRITICAL,
                         "Unable to create "GEOREP" slave log directory");
@@ -499,6 +497,13 @@ configure_syncdaemon (glusterd_conf_t *conf)
         runinit_gsyncd_setrx (&runner, conf);
         runner_add_arg (&runner, "state-file");
         runner_argprintf (&runner, "%s/${mastervol}/${eSlave}.status", georepdir);
+        runner_add_args (&runner, ".", ".", NULL);
+        RUN_GSYNCD_CMD;
+
+        /* state-socket */
+        runinit_gsyncd_setrx (&runner, conf);
+        runner_add_arg (&runner, "state-socket-unencoded");
+        runner_argprintf (&runner, "%s/${mastervol}/${eSlave}.socket", georepdir);
         runner_add_args (&runner, ".", ".", NULL);
         RUN_GSYNCD_CMD;
 
@@ -978,10 +983,6 @@ init (xlator_t *this)
         (void) glusterd_nodesvc_set_running ("glustershd", _gf_false);
         /* this->ctx->top = this;*/
 
-        ret = glusterd_uuid_init (first_time);
-        if (ret < 0)
-                goto out;
-
         GLUSTERD_GET_HOOKS_DIR (hooks_dir, GLUSTERD_HOOK_VER, conf);
         if (stat (hooks_dir, &buf)) {
                 ret = glusterd_hooks_create_hooks_directory (dirname);
@@ -993,6 +994,8 @@ init (xlator_t *this)
         }
 
         INIT_LIST_HEAD (&conf->mount_specs);
+
+        ret = 0;
         dict_foreach (this->options, _install_mount_spec, &ret);
         if (ret)
                 goto out;
@@ -1019,6 +1022,10 @@ init (xlator_t *this)
 
         glusterd_restart_bricks (conf);
         ret = glusterd_restart_gsyncds (conf);
+        if (ret)
+                goto out;
+
+        ret = glusterd_hooks_spawn_worker (this);
         if (ret)
                 goto out;
 
