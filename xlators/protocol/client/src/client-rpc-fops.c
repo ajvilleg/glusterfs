@@ -26,9 +26,9 @@ rpc_clnt_prog_t clnt3_1_fop_prog;
 int
 client_submit_vec_request (xlator_t  *this, void *req, call_frame_t  *frame,
                            rpc_clnt_prog_t *prog, int procnum,
-                           fop_cbk_fn_t cbkfn, struct iovec  *payload,
-                           int payloadcnt, struct iobref *iobref,
-                           xdrproc_t xdrproc)
+                           fop_cbk_fn_t cbkfn,
+                           struct iovec  *payload, int payloadcnt,
+                           struct iobref *iobref, xdrproc_t xdrproc)
 {
         int             ret        = 0;
         clnt_conf_t    *conf       = NULL;
@@ -1103,13 +1103,6 @@ client3_1_getxattr_cbk (struct rpc_req *req, struct iovec *iov, int count,
                                       op_errno, out);
 
 out:
-#if defined(STUPIDSTUPIDSTUPID)
-        /*
-         * No, this does not $#@! well deserve a warning.  It just might not
-         * exist, OK?  Logging this every time has a severe performance impact,
-         * and by the way the use of local->loc.path is FUBAR since the GFID
-         * changes went in.
-         */
         if (rsp.op_ret == -1) {
                 gf_log (this->name, (((op_errno == ENOTSUP) || (op_errno == ENODATA)) ?
                                      GF_LOG_DEBUG : GF_LOG_WARNING),
@@ -1120,7 +1113,6 @@ out:
                         uuid_utoa (local->loc.inode->gfid) : "--",
                         (local) ? local->name : "(null)");
         }
-#endif
 
         CLIENT_STACK_UNWIND (getxattr, frame, rsp.op_ret, op_errno, dict, xdata);
 

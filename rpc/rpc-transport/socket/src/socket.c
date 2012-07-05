@@ -815,7 +815,6 @@ __socket_read_vectored_request (rpc_transport_t *this, rpcsvc_vector_sizer vecto
         uint32_t          remaining_size         = 0;
         ssize_t           readsize               = 0;
         size_t            size = 0;
-        char             *proghdr_buf = NULL;
 
         GF_VALIDATE_OR_GOTO ("socket", this, out);
         GF_VALIDATE_OR_GOTO ("socket", this->private, out);

@@ -1429,13 +1429,10 @@ server_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         state = CALL_STATE(frame);
 
         if (op_ret < 0) {
-                if (op_errno != EKEYEXPIRED) {
-                        gf_log (this->name, GF_LOG_INFO,
-                                "%"PRId64": WRITEV %"PRId64" (%s) ==> (%s)",
-                                frame->root->unique, state->resolve.fd_no,
-                                uuid_utoa (state->resolve.gfid),
-                                strerror (op_errno));
-                }
+                gf_log (this->name, GF_LOG_INFO,
+                        "%"PRId64": WRITEV %"PRId64" (%s) ==> (%s)",
+                        frame->root->unique, state->resolve.fd_no,
+                         uuid_utoa (state->resolve.gfid), strerror (op_errno));
                 goto out;
         }
 
@@ -3335,10 +3332,6 @@ server_readv (rpcsvc_request_t *req)
                                       (args.xdata.xdata_len), ret,
                                       op_errno, out);
 
-#ifdef GF_TESTING_IO_XDATA
-        dict_dump (state->xdata);
-#endif
-
         ret = 0;
         resolve_and_resume (frame, server_readv_resume);
 out:
@@ -3361,26 +3354,23 @@ server_writev (rpcsvc_request_t *req)
         gfs3_write_req       args   = {{0,},};
         ssize_t              len    = 0;
         int                  i      = 0;
-        int                  j      = 0;
         int                  ret    = -1;
         int                  op_errno = 0;
 
         if (!req)
                 return ret;
 
-        len = xdr_to_generic (req->msg[0], &args,
-                              (xdrproc_t)xdr_gfs3_write_req);
-        if (len <= 0) {
-                /*
-                 * Docs say this should return 0 or a real length, but it will
-                 * also return -1 in the bogus xdr_bytes case mentioned above.
-                 */
+        len = xdr_to_generic (req->msg[0], &args, (xdrproc_t)xdr_gfs3_write_req);
+        if (len == 0) {
+                //failed to decode msg;
+                req->rpc_err = GARBAGE_ARGS;
                 goto out;
         }
 
         frame = get_frame_from_request (req);
         if (!frame) {
                 // something wrong, mostly insufficient memory
+                req->rpc_err = GARBAGE_ARGS; /* TODO */
                 goto out;
         }
         frame->root->op = GF_FOP_WRITE;
@@ -3388,6 +3378,7 @@ server_writev (rpcsvc_request_t *req)
         state = CALL_STATE (frame);
         if (!state->conn->bound_xl) {
                 /* auth failure, request on subvolume without setvolume */
+                req->rpc_err = GARBAGE_ARGS;
                 goto out;
         }
 
@@ -3398,31 +3389,19 @@ server_writev (rpcsvc_request_t *req)
         state->iobref        = iobref_ref (req->iobref);
         memcpy (state->resolve.gfid, args.gfid, 16);
 
-        GF_PROTOCOL_DICT_UNSERIALIZE (state->conn->bound_xl, state->xdata,
-                                      (args.xdata.xdata_val),
-                                      (args.xdata.xdata_len), ret,
-                                      op_errno, dict_err);
-
-        j = 0;
-        for (i = 0; i < req->count; ++i) {
-                if (len) {
-                        if (len >= req->msg[i].iov_len) {
-                                len -= req->msg[i].iov_len;
-                                continue;
-                        }
-                        state->payload_vector[j].iov_base
-                                = (req->msg[i].iov_base + len);
-                        state->payload_vector[j].iov_len
-                                = req->msg[i].iov_len - len;
-                        len = 0;
-                }
-                else {
-                        state->payload_vector[j] = req->msg[i];
-                }
-                ++j;
+        if (len < req->msg[0].iov_len) {
+                state->payload_vector[0].iov_base
+                        = (req->msg[0].iov_base + len);
+                state->payload_vector[0].iov_len
+                        = req->msg[0].iov_len - len;
+                state->payload_count = 1;
         }
-        state->payload_count = j;
-                 
+
+        for (i = 1; i < req->count; i++) {
+                state->payload_vector[state->payload_count++]
+                        = req->msg[i];
+        }
+
         for (i = 0; i < state->payload_count; i++) {
                 state->size += state->payload_vector[i].iov_len;
         }
@@ -3439,14 +3418,13 @@ server_writev (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_writev_resume);
 out:
-       return ret;
-dict_err:
-        /*
-         * GF_PROTOCOL_DICT_UNSERIALIZE really doesn't report errors the
-         * right way for our purposes.  Undo its damage.
-         */
-        req->rpc_err = GARBAGE_ARGS;
-        return -1;
+        if (args.xdata.xdata_val)
+                free (args.xdata.xdata_val);
+
+        if (op_errno)
+                req->rpc_err = GARBAGE_ARGS;
+
+        return ret;
 }
 
 

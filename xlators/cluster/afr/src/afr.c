@@ -651,11 +651,6 @@ struct volume_options options[] = {
                          "this many bricks or present.  Other quorum types "
                          "will OVERWRITE this value.",
         },
-        { .key = {"fast-path"},
-          .type = GF_OPTION_TYPE_BOOL,
-          .default_value = "off",
-          .description = "Turn off locking and xattr updates on writes, *for "
-                         "performance testing only*."},
         { .key  = {"node-uuid"},
           .type = GF_OPTION_TYPE_STR,
           .description = "Local glusterd uuid string",

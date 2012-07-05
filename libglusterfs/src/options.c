@@ -780,11 +780,8 @@ xl_opt_validate (dict_t *dict, char *key, data_t *value, void *data)
         vol_opt = stub->vol_opt;
 
         opt = xlator_volume_option_get_list (vol_opt, key);
-        if (!opt) {
-                gf_log (__func__, GF_LOG_WARNING,
-                        "could not find %s in option list", key);
+        if (!opt)
                 return;
-        }
 
         ret = xlator_option_validate (xl, key, value->data, opt, &errstr);
         if (ret)
@@ -823,8 +820,6 @@ xlator_options_validate_list (xlator_t *xl, dict_t *options,
 
         dict_foreach (options, xl_opt_validate, &stub);
         if (stub.errstr) {
-                gf_log (xl->name, GF_LOG_WARNING, "could not validate as %s",
-                        xl->type);
                 ret = -1;
                 if (op_errstr)
                         *op_errstr = stub.errstr;
