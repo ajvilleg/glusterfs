@@ -13,69 +13,78 @@ import healer
 # Expected content is not used unless the expected result is True.
 tests = (
 	# Basic tests with no fool+wise nodes.
-	( "noop",			(0,0,0,0), False,	None,	None ),
-	( "normal failure",	(0,1,0,1), False,	True,	"client-0" ),
-	( "stale accuse",	(0,1,0,0), False,	True,	"client-0" ),
-	( "admit guilt",	(0,0,0,1), False,	True,	"client-0" ),
-	( "split brain",	(0,1,1,0), False,	False,	None ),
-	( "two fools",		(1,0,0,1), False,	False,	None ),
-	( "two fools aggr",	(1,0,0,1), True,	False,	None ),
+	( "noop",			(0,0,0,0), False,	"not needed",	None ),
+	( "normal failure",	(0,1,0,1), False,	"healed",		"client-0" ),
+	( "stale accuse",	(0,1,0,0), False,	"healed",		"client-0" ),
+	( "admit guilt",	(0,0,0,1), False,	"healed",		"client-0" ),
+	( "split brain",	(0,1,1,0), False,	"heal failed",	None ),
+	( "two fools",		(1,0,0,1), False,	"heal failed",	None ),
+	( "two fools aggr",	(1,0,0,1), True,	"heal failed",	None ),
 	# Tests with fool+wise nodes but no mutual accusation.
-	( "fool+wise",		(1,1,0,0), False,	False,	None ),
-	( "fw stand",		(1,2,0,0), True,	True,	"client-0" ),
-	( "fw withdraw",	(1,1,0,0), True,	True,	"client-1" ),
-	( "fw reverse",		(2,1,0,0), True,	True,	"client-1" ),
-	( "fw+fool",		(1,1,0,1), False,	False,	None ),
-	( "fw+fool aggr",	(1,1,0,1), True,	False,	None ),
+	( "fool+wise",		(1,1,0,0), False,	"heal failed",	None ),
+	( "fw stand",		(1,2,0,0), True,	"healed",		"client-0" ),
+	( "fw withdraw",	(1,1,0,0), True,	"healed",		"client-1" ),
+	( "fw reverse",		(2,1,0,0), True,	"healed",		"client-1" ),
+	( "fw+fool",		(1,1,0,1), False,	"heal failed",	None ),
+	( "fw+fool aggr",	(1,1,0,1), True,	"heal failed",	None ),
 	# Tests with mutual accusation (classic split brain).
-	( "fw+accuse",		(1,1,1,0), False,	False,	None ),
-	( "fw+accuse aggr",	(1,1,1,0), True,	True,	"client-1" ),
+	( "fw+accuse",		(1,1,1,0), False,	"heal failed",	None ),
+	( "fw+accuse aggr",	(1,1,1,0), True,	"healed",		"client-1" ),
 )
 
-# TBD: non-zero meta/entry xattr, more than two nodes (including tie-breaker).
+# TBD: unsafe (non-zero meta/entry count), gfid mismatch
+# more than two nodes (including tie-breaker).
 
-def create_files (name, xa_values):
+def create_files (name, xa_values, fnum):
 	index = 0
 	for b in bricks:
 		abs_path = "%s/%s" % (b.path, name)
 		fp = open(abs_path,"w")
 		fp.write(b.name)
+		xattr.set(abs_path,"trusted.gfid","bogus GFID %d"%fnum)
 		for b2 in bricks:
-			xname = "trusted.afr.%s" % b2.name
+			xname = "trusted.afr.test-%s" % b2.name
 			value = struct.pack(">III",xa_values[index],0,0)
 			index += 1
 			xattr.set(abs_path,xname,value)
 
 def check_content (name, content):
+	found = 0
 	for b in bricks:
 		abs_path = "%s/%s" % (b.path, name)
-		fp = open(abs_path,"r")
+		try:
+			fp = open(abs_path,"r")
+		except IOError:
+			continue
 		if fp.readlines() != [content]:
 			return False
-	return True
+		found += 1
+	return (found > 0)
 
 def check_xattrs (name):
 	for b in bricks:
 		abs_path = "%s/%s" % (b.path, name)
 		for b2 in bricks:
-			xname = "trusted.afr.%s" % b2.name
+			xname = "trusted.afr.test-%s" % b2.name
 			value = xattr.get(abs_path,xname)
 			if value == -1:
-				return False
+				print "failed to get %s:%s" % (abs_path, xname)
+				continue
 			counts = struct.unpack(">III",value)
 			if counts[0]:
+				print "%s:%s = %d" % (abs_path, xname, counts[0])
 				return False
 	return True
 
 def run_test (index, xa_values, aggr_mode, exp_result, content):
 	fname = "test%d" % index
-	create_files(fname,xa_values)
+	create_files(fname,xa_values,index)
 	healer.options.aggressive = aggr_mode
 	act_result = healer.heal_file(fname)
 	if act_result != exp_result:
 		print "WRONG RESULT"
 		return False
-	if act_result:
+	if act_result == "healed":
 		if not check_content(fname,content):
 			print "DATA MISMATCH"
 			return False

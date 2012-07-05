@@ -1120,6 +1120,7 @@ posix_rmdir (call_frame_t *frame, xlator_t *this,
         int32_t op_errno  = 0;
         char *  real_path = NULL;
         char *  par_path = NULL;
+        char *  gfid_str = NULL;
         struct iatt   preparent = {0,};
         struct iatt   postparent = {0,};
         struct iatt   stbuf;
@@ -1159,12 +1160,13 @@ posix_rmdir (call_frame_t *frame, xlator_t *this,
         }
 
         if (flags) {
-                uint32_t hashval = 0;
-                char *tmp_path = alloca (strlen (priv->trash_path) + 16);
+                gfid_str = uuid_utoa (stbuf.ia_gfid);
+                char *tmp_path = alloca (strlen (priv->trash_path) +
+                                         strlen ("/") +
+                                         strlen (gfid_str) + 1);
 
                 mkdir (priv->trash_path, 0755);
-                hashval = gf_dm_hashfn (real_path, strlen (real_path));
-                sprintf (tmp_path, "%s/%u", priv->trash_path, hashval);
+                sprintf (tmp_path, "%s/%s", priv->trash_path, gfid_str);
                 op_ret = rename (real_path, tmp_path);
         } else {
                 op_ret = rmdir (real_path);
@@ -1808,7 +1810,7 @@ out:
 
         STACK_UNWIND_STRICT (create, frame, op_ret, op_errno,
                              fd, (loc)?loc->inode:NULL, &stbuf, &preparent,
-                             &postparent, NULL);
+                             &postparent, xdata);
 
         return 0;
 }
@@ -2668,7 +2670,13 @@ posix_getxattr (call_frame_t *frame, xlator_t *this,
 done:
         op_ret = size;
 
-        if (dict) {
+        /*
+         * If they specifically asked for it, give it to them.  Reading a value
+         * isn't harmful, after all.  Even if we did want to disallow such
+         * explicit queries, returning success with an empty dict would be
+         * incorrect.
+         */
+        if (dict && name && strcmp(name,GFID_XATTR_KEY)) {
                 dict_del (dict, GFID_XATTR_KEY);
         }
 
@@ -3536,10 +3544,6 @@ posix_fill_readdir (fd_t *fd, DIR *dir, off_t off, size_t size,
                         break;
                 }
 
-                if ((uuid_compare (fd->inode->gfid, rootgfid) == 0)
-                    && (!strcmp (entry->d_name, GF_REPLICATE_TRASH_DIR)))
-                        continue;
-
 #ifdef __NetBSD__
 	       /*
 		* NetBSD with UFS1 backend uses backing files for
@@ -3611,6 +3615,64 @@ posix_entry_xattr_fill (xlator_t *this, inode_t *inode,
 
 }
 
+
+int
+posix_readdirp_fill (xlator_t *this, fd_t *fd, gf_dirent_t *entries, dict_t *dict)
+{
+        gf_dirent_t     *entry    = NULL;
+        inode_table_t   *itable   = NULL;
+	inode_t         *inode    = NULL;
+	char            *hpath    = NULL;
+	int              len      = 0;
+        struct iatt      stbuf    = {0, };
+	uuid_t           gfid;
+
+
+        itable = fd->inode->table;
+
+	len = posix_handle_path (this, fd->inode->gfid, NULL, NULL, 0);
+	hpath = alloca (len + 256); /* NAME_MAX */
+	posix_handle_path (this, fd->inode->gfid, NULL, hpath, len);
+	len = strlen (hpath);
+	hpath[len] = '/';
+
+        list_for_each_entry (entry, &entries->list, list) {
+		memset (gfid, 0, 16);
+		inode = inode_grep (fd->inode->table, fd->inode,
+				    entry->d_name);
+		if (inode)
+			uuid_copy (gfid, inode->gfid);
+
+		strcpy (&hpath[len+1], entry->d_name);
+
+                posix_pstat (this, gfid, hpath, &stbuf);
+
+		if (!inode)
+			inode = inode_find (itable, stbuf.ia_gfid);
+
+		if (!inode)
+			inode = inode_new (itable);
+
+		entry->inode = inode;
+
+                if (dict) {
+                        entry->dict =
+                                posix_entry_xattr_fill (this, entry->inode,
+                                                        fd, entry->d_name,
+                                                        dict, &stbuf);
+                        dict_ref (entry->dict);
+                }
+
+                entry->d_stat = stbuf;
+                if (stbuf.ia_ino)
+                        entry->d_ino = stbuf.ia_ino;
+		inode = NULL;
+        }
+
+	return 0;
+}
+
+
 int32_t
 posix_do_readdir (call_frame_t *frame, xlator_t *this,
                   fd_t *fd, size_t size, off_t off, int whichop, dict_t *dict)
@@ -3622,13 +3684,7 @@ posix_do_readdir (call_frame_t *frame, xlator_t *this,
         int32_t               op_ret         = -1;
         int32_t               op_errno       = 0;
         gf_dirent_t           entries;
-        struct iatt           stbuf          = {0, };
-        gf_dirent_t          *tmp_entry      = NULL;
-        inode_table_t        *itable         = NULL;
-#ifdef IGNORE_READDIRP_ATTRS
-        uuid_t                gfid;
-        ia_type_t             entry_type     = 0;
-#endif
+
 
         VALIDATE_OR_GOTO (frame, out);
         VALIDATE_OR_GOTO (this, out);
@@ -3651,7 +3707,7 @@ posix_do_readdir (call_frame_t *frame, xlator_t *this,
                         "dir is NULL for fd=%p", fd);
                 op_errno = EINVAL;
                 goto out;
-        }
+	}
 
         count = posix_fill_readdir (fd, dir, off, size, &entries);
 
@@ -3662,43 +3718,7 @@ posix_do_readdir (call_frame_t *frame, xlator_t *this,
         if (whichop != GF_FOP_READDIRP)
                 goto out;
 
-        itable = fd->inode->table;
-
-        list_for_each_entry (tmp_entry, &entries.list, list) {
-#ifdef IGNORE_READDIRP_ATTRS
-                ret = inode_grep_for_gfid (fd->inode->table, fd->inode,
-                                           tmp_entry->d_name, gfid,
-                                           &entry_type);
-                if (ret == 0) {
-                        memset (&stbuf, 0, sizeof (stbuf));
-                        uuid_copy (stbuf.ia_gfid, gfid);
-                        posix_fill_ino_from_gfid (this, &stbuf);
-                        stbuf.ia_type = entry_type;
-                } else {
-                        posix_istat (this, fd->inode->gfid,
-                                     tmp_entry->d_name, &stbuf);
-                }
-#else
-                posix_istat (this, fd->inode->gfid,
-                             tmp_entry->d_name, &stbuf);
-#endif
-                if (stbuf.ia_ino)
-                        tmp_entry->d_ino = stbuf.ia_ino;
-
-                if (dict) {
-                        tmp_entry->inode = inode_find (itable, stbuf.ia_gfid);
-                        if (!tmp_entry->inode)
-                                tmp_entry->inode = inode_new (itable);
-
-                        tmp_entry->dict =
-                                posix_entry_xattr_fill (this, tmp_entry->inode,
-                                                        fd, tmp_entry->d_name,
-                                                        dict, &stbuf);
-                        dict_ref (tmp_entry->dict);
-                }
-
-                tmp_entry->d_stat = stbuf;
-        }
+	posix_readdirp_fill (this, fd, &entries, dict);
 
 out:
         STACK_UNWIND_STRICT (readdir, frame, op_ret, op_errno, &entries, NULL);
@@ -4052,20 +4072,6 @@ init (xlator_t *this)
         _private->base_path = gf_strdup (dir_data->data);
         _private->base_path_length = strlen (_private->base_path);
 
-        _private->trash_path = GF_CALLOC (1, _private->base_path_length
-                                          + strlen ("/")
-                                          + strlen (GF_REPLICATE_TRASH_DIR)
-                                          + 1,
-                                          gf_posix_mt_trash_path);
-
-        if (!_private->trash_path) {
-                ret = -1;
-                goto out;
-        }
-
-        strncpy (_private->trash_path, _private->base_path, _private->base_path_length);
-        strcat (_private->trash_path, "/" GF_REPLICATE_TRASH_DIR);
-
         LOCK_INIT (&_private->lock);
 
         ret = dict_get_str (this->options, "hostname", &_private->hostname);
@@ -4197,6 +4203,14 @@ init (xlator_t *this)
         if (op_ret == -1) {
                 gf_log (this->name, GF_LOG_ERROR,
                         "Posix handle setup failed");
+                ret = -1;
+                goto out;
+        }
+
+        op_ret = posix_handle_trash_init (this);
+        if (op_ret < 0) {
+                gf_log (this->name, GF_LOG_ERROR,
+                        "Posix landfill setup failed");
                 ret = -1;
                 goto out;
         }

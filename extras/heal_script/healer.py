@@ -20,6 +20,7 @@ import optparse
 import os
 import pipes
 import shutil
+import string
 import struct
 import subprocess
 import sys
@@ -33,6 +34,7 @@ import xattr
 class StubOpt:
 	def __init__ (self):
 		self.aggressive = False
+		self.gfid_mismatch = False
 		self.host = "localhost"
 		self.verbose = False
 options = StubOpt()
@@ -64,11 +66,16 @@ def generate_stanza (vf, all_xlators, cur_subvol):
 		vf.write("  subvolumes %s\n"%string.join(list))
 	vf.write("end-volume\n\n")
 
-def mount_brick (localpath, all_xlators, dht_subvol):
+def mount_brick (localpath, all_xlators, a_subvol):
 	# Generate a volfile.
 	vf_name = localpath + ".vol"
 	vf = open(vf_name,"w")
-	generate_stanza(vf,all_xlators,dht_subvol)
+	generate_stanza(vf,all_xlators,a_subvol)
+	if options.gfid_mismatch:
+		vf.write("volume %s-flipper\n"%a_subvol.name)
+		vf.write("  type features/flipper\n")
+		vf.write("  subvolumes %s\n"%a_subvol.name)
+		vf.write("end-volume\n")
 	vf.flush()
 	vf.close()
 
@@ -86,56 +93,76 @@ def all_are_same (rel_path):
 		curr_sum = t.open(None,"r").readline().split(" ")[0]
 		if curr_sum != first_sum:
 			return False
-	print "all files are the same for %s" % rel_path
 	return True
 
 class CopyFailExc (Exception):
 	pass
 
-def copy_contents (rel_path, source):
-	srcfd = os.open("%s/%s"%(source.path,rel_path),os.O_RDONLY)
-	dstfd_list = []
-	for b in bricks:
-		if b == source:
-			continue
-		dstfd = os.open("%s/%s"%(b.path,rel_path),os.O_WRONLY)
-		dstfd_list.append(dstfd)
-	try:
-		wrote = 0
-		while True:
-			buf = os.read(srcfd,65536)
-			if not buf:
-				break
-			bsz = len(buf)
-			for dstfd in dstfd_list:
-				n = os.write(dstfd,buf)
-				if n < bsz:
-					raise CopyFailExc(dstfd,n,bsz)
-			wrote += len(buf)
-		if options.verbose:
-			print "copied %d bytes" % wrote
-		for dstfd in dstfd_list:
-			os.ftruncate(dstfd,wrote)
-	except CopyFailExc as e:
-		print "failed write: %s" % repr(e)
-	for dstfd in dstfd_list:
-		os.close(dstfd)
-	os.close(srcfd)
+def clear_one_xattr (abs_path, xbrick):
+		xname = "trusted.afr.%s" % xbrick.name
+		value = xattr.get(abs_path,xname)
+		if value != -1:
+			counts = struct.unpack(">III",value)
+			value = struct.pack(">III",0,counts[1],counts[2])
+			xattr.set(abs_path,xname,value)
 
 def clear_xattrs (rel_path):
 	for fbrick in bricks:
 		abs_path = "%s/%s" % (fbrick.path, rel_path)
 		for xbrick in bricks:
-			xname = "trusted.afr.%s" % xbrick.name
-			value = xattr.get(abs_path,xname)
-			if value != -1:
-				counts = struct.unpack(">III",value)
-				value = struct.pack(">III",0,counts[1],counts[2])
-				xattr.set(abs_path,xname,value)
+			clear_one_xattr(abs_path,xbrick)
 
-# Return True if we healed, False if we weren't able to, None if we never even
-# needed to.  Note that None evaluated as a boolean is false.
+def remove_dups (rel_path, source):
+	src_path = "%s/%s" % (source.path, rel_path)
+	for b in bricks:
+		if b == source:
+			continue
+		abs_path = "%s/%s" % (b.spath, rel_path)
+		try:
+			if options.verbose:
+				"Unlinking %s" % abs_path
+			os.unlink("%s/%s"%(b.path,rel_path))
+		except OSError:
+			print "Could not unlink %s" % abs_path
+
+def fix_gfid (rel_path):
+	abs_path = "%s/%s" % (bricks[0].path, rel_path)
+	gfid = xattr.get(abs_path,"busted.gfid")
+	if gfid == -1:
+		print "Can't fix GFID (first missing)"
+		return
+	for b in bricks[1:]:
+		abs_path = "%s/%s" % (bricks[0].path, rel_path)
+		try:
+			if options.verbose:
+				print "Unlinking %s" % abs_path
+			os.unlink(abs_path)
+		except OSError:
+			print "Failed to fix GFID on %s" % abs_path
+
+# Possible return values:
+#	"not needed"
+#	"healed"
+#	"heal failed"
+#	"unsafe"
+#	"gfid mismatch"
 def heal_file (rel_path):
+
+	# Sanity check for gfid mismatch.
+	# This code is inoperative while requests for trusted.gfid are blocked.
+	if options.gfid_mismatch:
+		first_gfid = None
+		for b in bricks:
+			abs_path = "%s/%s" % (b.path, rel_path)
+			gfid = xattr.get(abs_path,"busted.gfid")
+			if gfid == -1:
+				print "Couldn't get GFID on %s" % abs_path
+				return "gfid mismatch"
+			if not first_gfid:
+				first_gfid = gfid
+			elif gfid != first_gfid:
+				print "GFID mismatch on %s" % abs_path
+				return "gfid mismatch"
 
 	# First, collect all of the xattr information.
 	accusations = 0
@@ -147,6 +174,7 @@ def heal_file (rel_path):
 			xname = "trusted.afr.%s" % target.name
 			value = xattr.get(abs_path,xname)
 			if value == -1:
+				print "FAILED TO GET %s:%s" % (abs_path, xname)
 				counts = (0,0,0)
 			else:
 				counts = struct.unpack(">III",value)
@@ -155,12 +183,12 @@ def heal_file (rel_path):
 			# For now, don't try to heal with pending metadata/entry ops.
 			if counts[1]:
 				print "Can't heal %s (%s metadata count for %s = %d)" % (
-					abs_path, viewer.spath, target.spath, count[1])
-				return False
+					abs_path, viewer.spath, target.spath, counts[1])
+				return "unsafe"
 			if counts[2]:
 				print "Can't heal %s (%s entry count for %s = %d)" % (
-					rel_path, viewer.spath, target.spath, count[1])
-				return False
+					rel_path, viewer.spath, target.spath, counts[1])
+				return "unsafe"
 			if counts[0] != 0:
 				accusations += 1
 			tmp[target.name] = counts[0]
@@ -168,7 +196,7 @@ def heal_file (rel_path):
 	# Might as well bail out early in this case.
 	if accusations == 0:
 		print "No heal needed for %s (no accusations)" % rel_path
-		return None
+		return "not needed"
 	# If a node accuses itself, its accusations of others are suspect.  Whether
 	# they stand depends on how the two counts that lead to the accusations
 	# compare:
@@ -218,14 +246,14 @@ def heal_file (rel_path):
 			if matrix[target.name][viewer.name]:
 				print "Can't heal %s (%s and %s accuse each other)" % (
 					rel_path, viewer.spath, target.spath)
-				return False
+				return "heal failed"
 			# Check for self+other accusation.
 			if options.aggressive:
 				continue
 			if matrix[viewer.name][viewer.name]:
 				print "Can't heal %s (%s accuses self+%s)" % (
 					rel_path, viewer.spath, target.spath)
-				return False
+				return "heal failed"
 	# Any node that's no longer accused by anyone can be a source.  As a
 	# tie-breaker, we choose the node that seems furthest ahead by virtue of
 	# accusing others most strongly.
@@ -248,16 +276,25 @@ def heal_file (rel_path):
 	# Did we get a valid source?
 	if score > 0:
 		print "Heal %s from %s to others" % (rel_path, source.spath)
-		copy_contents(rel_path,source)
+		remove_dups(rel_path,source)
 		clear_xattrs(rel_path)
-		return True
+		return "healed"
 	elif score == 0:
 		print "Can't heal %s (accusations cancel out)" % rel_path
 		print matrix
-		return False
+		return "heal failed"
 	else:
 		print "Can't heal %s (no pristine source)" % rel_path
-		return False
+		return "heal failed"
+
+def touch_file (p, mode):
+        abs_path = "%s/%s" % (parent_vol.path, p)
+        if options.verbose:
+                print "Touching %s (%s)" % (abs_path, mode)
+        try:
+                os.stat(abs_path)
+        except OSError:
+                print "Touching %s failed?!?" % abs_path
 
 if __name__ == "__main__":
 
@@ -266,6 +303,9 @@ if __name__ == "__main__":
 	parser.add_option("-a", "--aggressive", dest="aggressive",
 					  default=False, action="store_true",
 					  help="heal even for certain split-brain scenarios")
+	parser.add_option("-g", "--gfid-mismatch", dest="gfid_mismatch",
+					  default=False, action="store_true",
+					  help="check for and (if aggressive) fix GFID mismatches")
 	parser.add_option("-H", "--host", dest="host",
 					  default="localhost", action="store",
 					  help="specify a server (for fetching volfile)")
@@ -286,6 +326,7 @@ if __name__ == "__main__":
 	orig_dir = os.getcwd()
 	work_dir = tempfile.mkdtemp()
 	bricks = []
+	parent_vol = None
 	def cleanup_workdir ():
 		os.chdir(orig_dir)
 		if options.verbose:
@@ -295,6 +336,10 @@ if __name__ == "__main__":
 			if subprocess.call(["umount",b.path]):
 				# It would be really bad to delete without unmounting.
 				print "Could not unmount %s" % b.path
+				delete_ok = False
+		if parent_vol:
+			if subprocess.call(["umount",parent_vol.path]):
+				print "Could not unmount %s" % parent_vol.path
 				delete_ok = False
 		if delete_ok:
 			shutil.rmtree(work_dir)
@@ -340,10 +385,26 @@ if __name__ == "__main__":
 		spath = "%s:%s" % (sv.opts["remote-host"], sv.opts["remote-subvolume"])
 		bricks.append(Brick(lpath,sv.name,spath))
 
+	if options.verbose:
+		print "Mounting parent volume..."
+        lpath = "%s/parent" % work_dir
+        mount_brick(lpath,all_xlators,afr_vol)
+        parent_vol = Brick(lpath,afr_vol.name,"<parent>")
+
 	# Do the real work.
 	for p in paths:
-		if heal_file(p):
+		result = heal_file(p)
+		if result == "healed":
+			touch_file(p,"normal")
+		if result in ("not needed", "healed", "unsafe"):
 			continue
-		if all_are_same(p):
-			clear_xattrs(p)
+		if not all_are_same(p):
+			print "Copies of %s diverge" % p
+			continue
+		if result == "gfid mismatch":
+			if not options.aggressive:
+				continue
+			fix_gfid(p)
+		clear_xattrs(p)
+		touch_file(p,"aggressive")
 
