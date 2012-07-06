@@ -14,22 +14,22 @@ import healer
 tests = (
 	# Basic tests with no fool+wise nodes.
 	( "noop",			(0,0,0,0), False,	"not needed",	None ),
-	( "normal failure",	(0,1,0,1), False,	"healed",		"client-0" ),
-	( "stale accuse",	(0,1,0,0), False,	"healed",		"client-0" ),
-	( "admit guilt",	(0,0,0,1), False,	"healed",		"client-0" ),
+	( "normal failure",	(0,1,0,1), False,	"healed",		"test-client-0" ),
+	( "stale accuse",	(0,1,0,0), False,	"healed",		"test-client-0" ),
+	( "admit guilt",	(0,0,0,1), False,	"healed",		"test-client-0" ),
 	( "split brain",	(0,1,1,0), False,	"heal failed",	None ),
 	( "two fools",		(1,0,0,1), False,	"heal failed",	None ),
 	( "two fools aggr",	(1,0,0,1), True,	"heal failed",	None ),
 	# Tests with fool+wise nodes but no mutual accusation.
 	( "fool+wise",		(1,1,0,0), False,	"heal failed",	None ),
-	( "fw stand",		(1,2,0,0), True,	"healed",		"client-0" ),
-	( "fw withdraw",	(1,1,0,0), True,	"healed",		"client-1" ),
-	( "fw reverse",		(2,1,0,0), True,	"healed",		"client-1" ),
+	( "fw stand",		(1,2,0,0), True,	"healed",		"test-client-0" ),
+	( "fw withdraw",	(1,1,0,0), True,	"healed",		"test-client-1" ),
+	( "fw reverse",		(2,1,0,0), True,	"healed",		"test-client-1" ),
 	( "fw+fool",		(1,1,0,1), False,	"heal failed",	None ),
 	( "fw+fool aggr",	(1,1,0,1), True,	"heal failed",	None ),
 	# Tests with mutual accusation (classic split brain).
 	( "fw+accuse",		(1,1,1,0), False,	"heal failed",	None ),
-	( "fw+accuse aggr",	(1,1,1,0), True,	"healed",		"client-1" ),
+	( "fw+accuse aggr",	(1,1,1,0), True,	"healed",		"test-client-1" ),
 )
 
 # TBD: unsafe (non-zero meta/entry count), gfid mismatch
@@ -43,7 +43,7 @@ def create_files (name, xa_values, fnum):
 		fp.write(b.name)
 		xattr.set(abs_path,"trusted.gfid","bogus GFID %d"%fnum)
 		for b2 in bricks:
-			xname = "trusted.afr.test-%s" % b2.name
+			xname = "trusted.afr.%s" % b2.name
 			value = struct.pack(">III",xa_values[index],0,0)
 			index += 1
 			xattr.set(abs_path,xname,value)
@@ -68,7 +68,6 @@ def check_xattrs (name):
 			xname = "trusted.afr.test-%s" % b2.name
 			value = xattr.get(abs_path,xname)
 			if value == -1:
-				print "failed to get %s:%s" % (abs_path, xname)
 				continue
 			counts = struct.unpack(">III",value)
 			if counts[0]:
@@ -104,7 +103,7 @@ os.chdir(work_dir)
 
 for index in (0,1):
 	lpath = "%s/brick%d" % (work_dir, index)
-	sv_name = "client-%d" % index
+	sv_name = "test-client-%d" % index
 	spath = "server-%d:/export" % index
 	os.mkdir(lpath)
 	bricks.append(healer.Brick(lpath,sv_name,spath))

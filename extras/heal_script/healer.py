@@ -45,6 +45,7 @@ class Brick:
 		self.path = path
 		self.name = name
 		self.spath = spath
+		self.present = False
 	def __repr__ (self):
 		return "Brick(%s,%s)" % (self.name,self.spath)
 
@@ -84,16 +85,19 @@ def mount_brick (localpath, all_xlators, a_subvol):
 	subprocess.call(["glusterfs","-f",vf_name,localpath])
 
 def all_are_same (rel_path):
-	t = pipes.Template()
-	t.prepend("md5sum %s/%s"%(bricks[0].path,rel_path),".-")
-	first_sum = t.open(None,"r").readline().split(" ")[0]
-	for b in bricks[1:]:
+	nsame = 0
+	for b in bricks:
+		if not b.present:
+			continue
 		t = pipes.Template()
 		t.prepend("md5sum %s/%s"%(b.path,rel_path),".-")
 		curr_sum = t.open(None,"r").readline().split(" ")[0]
-		if curr_sum != first_sum:
+		if not nsame:
+			first_sum = curr_sum
+		elif curr_sum != first_sum:
 			return False
-	return True
+		nsame += 1
+	return (nsame >= 2)
 
 class CopyFailExc (Exception):
 	pass
@@ -115,7 +119,7 @@ def clear_xattrs (rel_path):
 def remove_dups (rel_path, source):
 	src_path = "%s/%s" % (source.path, rel_path)
 	for b in bricks:
-		if b == source:
+		if (not b.present) or (b == source):
 			continue
 		abs_path = "%s/%s" % (b.spath, rel_path)
 		try:
@@ -167,9 +171,13 @@ def heal_file (rel_path):
 	# First, collect all of the xattr information.
 	accusations = 0
 	matrix = {}
+	npresent = 0
 	for viewer in bricks:
 		tmp = {}
 		abs_path = "%s/%s" % (viewer.path, rel_path)
+		if os.access(abs_path,os.F_OK):
+			viewer.present = True
+			npresent += 1
 		for target in bricks:
 			xname = "trusted.afr.%s" % target.name
 			value = xattr.get(abs_path,xname)
@@ -193,7 +201,10 @@ def heal_file (rel_path):
 				accusations += 1
 			tmp[target.name] = counts[0]
 		matrix[viewer.name] = tmp
-	# Might as well bail out early in this case.
+	# Might as well bail out early in these cases.
+	if npresent < 2:
+		print "Too few bricks (%s) for heal on %s" % (npresent, rel_path)
+		return "unsafe"
 	if accusations == 0:
 		print "No heal needed for %s (no accusations)" % rel_path
 		return "not needed"
@@ -254,12 +265,14 @@ def heal_file (rel_path):
 				print "Can't heal %s (%s accuses self+%s)" % (
 					rel_path, viewer.spath, target.spath)
 				return "heal failed"
-	# Any node that's no longer accused by anyone can be a source.  As a
-	# tie-breaker, we choose the node that seems furthest ahead by virtue of
-	# accusing others most strongly.
+	# Any node that has the file and is no longer accused by anyone can be a
+	# source.  As a tie-breaker, we choose the node that seems furthest ahead
+	# by virtue of accusing others most strongly.
 	source = None
 	score = -1
 	for candidate in bricks:
+		if not candidate.present:
+			continue
 		for viewer in bricks:
 			# If anyone accuses, candidate is rejected.
 			if matrix[viewer.name][candidate.name]:
