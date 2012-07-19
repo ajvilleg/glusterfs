@@ -295,8 +295,8 @@ gd_syncop_mgmt_stage_op (struct rpc_clnt *rpc, uuid_t my_uuid, uuid_t recv_uuid,
         args.op_ret = -1;
         args.op_errno = ENOTCONN;
 
-        ret = dict_allocate_and_serialize (dict_out, &req.buf.buf_val,
-                                           (size_t *)&req.buf.buf_len);
+        ret = dict_allocate_and_serialize (dict_out,
+                                           &req.buf.buf_val, &req.buf.buf_len);
         if (ret)
                 goto out;
 
@@ -306,8 +306,7 @@ gd_syncop_mgmt_stage_op (struct rpc_clnt *rpc, uuid_t my_uuid, uuid_t recv_uuid,
 
         if (args.errstr && errstr)
                 *errstr = args.errstr;
-        else if (args.errstr)
-                GF_FREE (args.errstr);
+        else GF_FREE (args.errstr);
 
         if (args.dict && dict_in)
                 *dict_in = args.dict;
@@ -395,8 +394,8 @@ gd_syncop_mgmt_commit_op (struct rpc_clnt *rpc, uuid_t my_uuid, uuid_t recv_uuid
         args.op_ret = -1;
         args.op_errno = ENOTCONN;
 
-        ret = dict_allocate_and_serialize (dict_out, &req.buf.buf_val,
-                                           (size_t *)&req.buf.buf_len);
+        ret = dict_allocate_and_serialize (dict_out,
+                                           &req.buf.buf_val, &req.buf.buf_len);
         if (ret)
                 goto out;
 
@@ -406,8 +405,7 @@ gd_syncop_mgmt_commit_op (struct rpc_clnt *rpc, uuid_t my_uuid, uuid_t recv_uuid
 
         if (args.errstr && errstr)
                 *errstr = args.errstr;
-        else if (args.errstr)
-                GF_FREE (args.errstr);
+        else GF_FREE (args.errstr);
 
         if (args.dict && dict_in)
                 *dict_in = args.dict;
@@ -580,7 +578,7 @@ glusterd_op_begin_synctask (rpcsvc_request_t *req, glusterd_op_t op,
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get ();
+        ctx = THIS->ctx;
 
         ret = synctask_new (ctx->env, gd_sync_task_begin,
                             gd_sync_task_completion,

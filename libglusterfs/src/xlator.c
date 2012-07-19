@@ -168,8 +168,7 @@ xlator_volopt_dynload (char *xlator_type, void **dl_handle,
 
         ret = 0;
  out:
-        if (name)
-                GF_FREE (name);
+        GF_FREE (name);
 
         gf_log ("xlator", GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
@@ -272,8 +271,7 @@ xlator_dynload (xlator_t *xl)
         ret = 0;
 
 out:
-        if (name)
-                GF_FREE (name);
+        GF_FREE (name);
         return ret;
 }
 
@@ -462,7 +460,7 @@ xlator_mem_acct_init (xlator_t *xl, int num_types)
         int             i = 0;
         int             ret = 0;
 
-        if (!gf_mem_acct_is_enabled())
+        if (!gf_mem_acct_is_enabled ())
                 return 0;
 
         if (!xl)
@@ -647,10 +645,8 @@ xlator_destroy (xlator_t *xl)
         if (!xl)
                 return 0;
 
-        if (xl->name)
-                GF_FREE (xl->name);
-        if (xl->type)
-                GF_FREE (xl->type);
+        GF_FREE (xl->name);
+        GF_FREE (xl->type);
         if (xl->dlhandle)
                 dlclose (xl->dlhandle);
         if (xl->options)
@@ -725,7 +721,7 @@ is_gf_log_command (xlator_t *this, const char *name, char *value)
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get();
+        ctx = this->ctx;
         if (!ctx)
                 goto out;
         if (!ctx->active)

@@ -232,6 +232,7 @@ glusterd_store_is_valid_brickpath (char *volname, char *brick)
         glusterd_brickinfo_t    *brickinfo = NULL;
         glusterd_volinfo_t      *volinfo = NULL;
         int32_t                 ret = 0;
+        size_t                  volname_len = strlen (volname);
 
         ret = glusterd_brickinfo_from_brick (brick, &brickinfo);
         if (ret) {
@@ -245,7 +246,12 @@ glusterd_store_is_valid_brickpath (char *volname, char *brick)
                 ret = 0;
                 goto out;
         }
-        strncpy (volinfo->volname, volname, sizeof (volinfo->volname));
+        if (volname_len >= sizeof (volinfo->volname)) {
+                gf_log ("", GF_LOG_WARNING, "volume name too long");
+                ret = 0;
+                goto out;
+        }
+        memcpy (volinfo->volname, volname, volname_len+1);
         glusterd_store_brickinfopath_set (volinfo, brickinfo, brickpath,
                                                 sizeof (brickpath));
 
@@ -1216,8 +1222,7 @@ out:
                 handle->read = NULL;
         }
 
-        if (free_str)
-                GF_FREE (free_str);
+        GF_FREE (free_str);
 
         return ret;
 }
@@ -1298,11 +1303,8 @@ out:
                 close (fd);
 
         if (ret == -1) {
-                if (spath)
-                        GF_FREE (spath);
-                if (shandle) {
-                        GF_FREE (shandle);
-                }
+                GF_FREE (spath);
+                GF_FREE (shandle);
         }
 
         gf_log ("", GF_LOG_DEBUG, "Returning %d", ret);
@@ -1448,8 +1450,7 @@ glusterd_retrieve_uuid ()
         uuid_parse (uuid_str, priv->uuid);
 
 out:
-        if (uuid_str)
-                GF_FREE (uuid_str);
+        GF_FREE (uuid_str);
         gf_log ("", GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
 }
@@ -1610,8 +1611,7 @@ out:
                         *value = NULL;
                 }
         }
-        if (free_str)
-                GF_FREE (free_str);
+        GF_FREE (free_str);
         if (op_errno)
                 *op_errno = store_errno;
 

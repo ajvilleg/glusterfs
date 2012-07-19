@@ -48,7 +48,7 @@
 #include "xdr-generic.h"
 
 int32_t
-glusterd3_1_brick_op_cbk (struct rpc_req *req, struct iovec *iov,
+glusterd_brick_op_cbk (struct rpc_req *req, struct iovec *iov,
                           int count, void *myframe);
 
 void
@@ -199,8 +199,7 @@ glusterd_defrag_notify (struct rpc_clnt *rpc, void *mydata,
                 if (defrag->cbk_fn)
                         defrag->cbk_fn (volinfo, volinfo->defrag_status);
 
-                if (defrag)
-                        GF_FREE (defrag);
+                GF_FREE (defrag);
                 gf_log ("", GF_LOG_DEBUG, "%s got RPC_CLNT_DISCONNECT",
                         rpc->conn.trans->name);
                 break;
@@ -487,8 +486,7 @@ out:
                                                      NULL, "operation failed");
         }
 
-        if (cli_req.dict.dict_val)
-                free (cli_req.dict.dict_val);//malloced by xdr
+        free (cli_req.dict.dict_val);//malloced by xdr
 
         return 0;
 }

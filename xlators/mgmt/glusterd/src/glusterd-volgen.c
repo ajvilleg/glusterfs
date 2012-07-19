@@ -120,6 +120,7 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"cluster.min-free-disk",                "cluster/distribute", NULL, NULL, NO_DOC, 0    },
         {"cluster.min-free-inodes",              "cluster/distribute", NULL, NULL, NO_DOC, 0    },
         {"cluster.rebalance-stats",              "cluster/distribute", NULL, NULL, NO_DOC, 0    },
+        {"cluster.subvols-per-directory",        "cluster/distribute", "directory-layout-spread", NULL, NO_DOC, 0    },
 
         {"cluster.entry-change-log",             "cluster/replicate",  NULL, NULL, NO_DOC, 0     },
         {"cluster.read-subvolume",               "cluster/replicate",  NULL, NULL, NO_DOC, 0    },
@@ -176,6 +177,7 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"network.frame-timeout",                "protocol/client",           NULL, NULL, NO_DOC, 0},
         {"network.ping-timeout",                 "protocol/client",           NULL, NULL, NO_DOC, 0},
         {"network.tcp-window-size",              "protocol/client",           NULL, NULL, NO_DOC, 0},
+        { "client.ssl",                          "protocol/client",           "transport.socket.ssl-enabled", NULL, NO_DOC, 0},
 
         {"network.tcp-window-size",              "protocol/server",           NULL, NULL, NO_DOC, 0},
         {"network.inode-lru-limit",              "protocol/server",           NULL, NULL, NO_DOC, 0},
@@ -183,6 +185,7 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {AUTH_REJECT_MAP_KEY,                    "protocol/server",           "!server-auth", NULL, DOC, 0},
         {"transport.keepalive",                  "protocol/server",           "transport.socket.keepalive", NULL, NO_DOC, 0},
         {"server.allow-insecure",                "protocol/server",           "rpc-auth-allow-insecure", NULL, NO_DOC, 0},
+        { "server.ssl",                          "protocol/server",           "transport.socket.ssl-enabled", NULL, NO_DOC, 0},
 
         {"performance.write-behind",             "performance/write-behind",  "!perf", "on", NO_DOC, 0},
         {"performance.read-ahead",               "performance/read-ahead",    "!perf", "on", NO_DOC, 0},
@@ -238,6 +241,7 @@ static struct volopt_map_entry glusterd_volopt_map[] = {
         {"features.grace-timeout",               "protocol/server",           "grace-timeout", NULL, DOC, 0},
         {"features.read-only",                   "features/read-only",        "!read-only", "off", DOC, 0},
         {"features.worm",                        "features/worm",             "!worm", "off", DOC, 0},
+	{"storage.linux-aio",                    "storage/posix",             NULL, NULL, DOC, 0},
         {NULL,                                                                }
 };
 
@@ -296,8 +300,7 @@ xlator_instantiate_va (const char *type, const char *format, va_list arg)
  error:
         gf_log ("", GF_LOG_ERROR, "creating xlator of type %s failed",
                 type);
-        if (volname)
-                GF_FREE (volname);
+        GF_FREE (volname);
         if (xl)
                 xlator_destroy (xl);
 
@@ -620,8 +623,7 @@ volopt_trie (char *key, char **hint)
         }
 
  out:
-        if (patt[0])
-                GF_FREE (patt[0]);
+        GF_FREE (patt[0]);
         if (ret)
                 *hint = NULL;
 
@@ -1245,8 +1247,7 @@ volgen_write_volfile (volgen_graph_t *graph, char *filename)
 
  error:
 
-        if (ftmp)
-                GF_FREE (ftmp);
+        GF_FREE (ftmp);
         if (f)
                 fclose (f);
 
@@ -2174,6 +2175,8 @@ volgen_graph_build_clients (volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
         char                    *str                = NULL;
         glusterd_brickinfo_t    *brick              = NULL;
         xlator_t                *xl                 = NULL;
+        char                    *ssl_str            = NULL;
+        gf_boolean_t             ssl_bool;
 
         volname = volinfo->volname;
 
@@ -2236,6 +2239,19 @@ volgen_graph_build_clients (volgen_graph_t *graph, glusterd_volinfo_t *volinfo,
                                                          str);
                                 if (ret)
                                         goto out;
+                        }
+                }
+
+                if (dict_get_str(set_dict,"client.ssl",&ssl_str) == 0) {
+                        if (gf_string2boolean(ssl_str,&ssl_bool) == 0) {
+                                if (ssl_bool) {
+                                        ret = xlator_set_option(xl,
+                                                "transport.socket.ssl-enabled",
+                                                "true");
+                                        if (ret) {
+                                                goto out;
+                                        }
+                                }
                         }
                 }
 
@@ -2451,8 +2467,7 @@ volgen_graph_build_dht_cluster (volgen_graph_t *graph,
         }
         ret = 0;
 out:
-        if (decommissioned_children)
-                GF_FREE (decommissioned_children);
+        GF_FREE (decommissioned_children);
         return ret;
 }
 

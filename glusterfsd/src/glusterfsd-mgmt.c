@@ -57,11 +57,13 @@ int glusterfs_process_volfp (glusterfs_ctx_t *ctx, FILE *fp);
 int glusterfs_graph_unknown_options (glusterfs_graph_t *graph);
 
 int
-mgmt_cbk_spec (void *data)
+mgmt_cbk_spec (struct rpc_clnt *rpc, void *mydata, void *data)
 {
         glusterfs_ctx_t *ctx = NULL;
+        xlator_t *this = NULL;
 
-        ctx = glusterfs_ctx_get ();
+        this = mydata;
+        ctx = glusterfsd_ctx;
         gf_log ("mgmt", GF_LOG_INFO, "Volume file changed");
 
         glusterfs_volfile_fetch (ctx);
@@ -70,10 +72,11 @@ mgmt_cbk_spec (void *data)
 
 
 int
-mgmt_cbk_event (void *data)
+mgmt_cbk_event (struct rpc_clnt *rpc, void *mydata, void *data)
 {
         return 0;
 }
+
 struct iobuf *
 glusterfs_serialize_reply (rpcsvc_request_t *req, void *arg,
                            struct iovec *outmsg, xdrproc_t xdrproc)
@@ -184,15 +187,14 @@ glusterfs_terminate_response_send (rpcsvc_request_t *req, int op_ret)
 
         if (dict)
                 ret = dict_allocate_and_serialize (dict, &rsp.output.output_val,
-                                                (size_t *)&rsp.output.output_len);
+                                                   &rsp.output.output_len);
 
 
         if (ret == 0)
                 ret = glusterfs_submit_reply (req, &rsp, NULL, 0, NULL,
                                               (xdrproc_t)xdr_gd1_mgmt_brick_op_rsp);
 
-        if (rsp.output.output_val)
-                GF_FREE (rsp.output.output_val);
+        GF_FREE (rsp.output.output_val);
         if (dict)
                 dict_unref (dict);
         return ret;
@@ -226,7 +228,7 @@ glusterfs_translator_info_response_send (rpcsvc_request_t *req, int ret,
         if (output) {
                 ret = dict_allocate_and_serialize (output,
                                                    &rsp.output.output_val,
-                                              (size_t *)&rsp.output.output_len);
+                                                   &rsp.output.output_len);
         }
         if (!ret)
                 free_ptr = _gf_true;
@@ -267,7 +269,7 @@ glusterfs_handle_translator_info_get_cont (gfd_vol_top_priv_t *priv)
                 goto cont;
 
 cont:
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         GF_ASSERT (ctx);
         active = ctx->active;
         any = active->first;
@@ -286,10 +288,8 @@ out:
         ret = glusterfs_translator_info_response_send (priv->req, ret,
                                                        msg, output);
 
-        if (priv->xlator_req.name)
-                free (priv->xlator_req.name);
-        if (priv->xlator_req.input.input_val)
-                free (priv->xlator_req.input.input_val);
+        free (priv->xlator_req.name);
+        free (priv->xlator_req.input.input_val);
         if (dict)
                 dict_unref (dict);
         if (output)
@@ -318,7 +318,7 @@ glusterfs_xlator_op_response_send (rpcsvc_request_t *req, int op_ret,
         if (output) {
                 ret = dict_allocate_and_serialize (output,
                                                    &rsp.output.output_val,
-                                              (size_t *)&rsp.output.output_len);
+                                                   &rsp.output.output_len);
         }
         if (!ret)
                 free_ptr = _gf_true;
@@ -496,8 +496,7 @@ out:
                 close (fd);
         if (input_fd >= 0)
                 close (input_fd);
-        if (buf)
-                GF_FREE (buf);
+        GF_FREE (buf);
         unlink (export_path);
 
         (void)glusterfs_handle_translator_info_get_cont (priv);
@@ -622,8 +621,7 @@ out:
                 close (input_fd);
         if (output_fd >= 0)
                 close (output_fd);
-        if (buf)
-                GF_FREE (buf);
+        GF_FREE (buf);
         unlink (export_path);
 
         (void)glusterfs_handle_translator_info_get_cont (priv);
@@ -660,7 +658,7 @@ glusterfs_handle_translator_op (void *data)
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         active = ctx->active;
         any = active->first;
         input = dict_new ();
@@ -713,8 +711,7 @@ out:
                 dict_unref (input);
         if (output)
                 dict_unref (output);
-        if (xlator_req.name)
-                free (xlator_req.name); //malloced by xdr
+        free (xlator_req.name); //malloced by xdr
 
         return 0;
 }
@@ -738,7 +735,7 @@ glusterfs_handle_defrag (rpcsvc_request_t *req)
         this = THIS;
         GF_ASSERT (this);
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         GF_ASSERT (ctx);
 
         active = ctx->active;
@@ -787,12 +784,10 @@ glusterfs_handle_defrag (rpcsvc_request_t *req)
 out:
         if (dict)
                 dict_unref (dict);
-        if (xlator_req.input.input_val)
-                free (xlator_req.input.input_val); // malloced by xdr
+        free (xlator_req.input.input_val); // malloced by xdr
         if (output)
                 dict_unref (output);
-        if (xlator_req.name)
-                free (xlator_req.name); //malloced by xdr
+        free (xlator_req.name); //malloced by xdr
 
         return ret;
 
@@ -846,7 +841,7 @@ glusterfs_handle_brick_status (rpcsvc_request_t *req)
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         GF_ASSERT (ctx);
         active = ctx->active;
         any = active->first;
@@ -904,7 +899,7 @@ glusterfs_handle_brick_status (rpcsvc_request_t *req)
                 rsp.op_errstr = "";
 
         ret = dict_allocate_and_serialize (output, &rsp.output.output_val,
-                                           (size_t *)&rsp.output.output_len);
+                                           &rsp.output.output_len);
         if (ret) {
                 gf_log (this->name, GF_LOG_ERROR,
                         "Failed to serialize output dict to rsp");
@@ -919,14 +914,10 @@ out:
                 dict_unref (dict);
         if (output)
                 dict_unref (output);
-        if (brick_req.input.input_val)
-                free (brick_req.input.input_val);
-        if (xname)
-                GF_FREE (xname);
-        if (msg)
-                GF_FREE (msg);
-        if (rsp.output.output_val)
-                GF_FREE (rsp.output.output_val);
+        free (brick_req.input.input_val);
+        GF_FREE (xname);
+        GF_FREE (msg);
+        GF_FREE (rsp.output.output_val);
 
         return ret;
 }
@@ -986,7 +977,7 @@ glusterfs_handle_node_status (rpcsvc_request_t *req)
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         GF_ASSERT (ctx);
         active = ctx->active;
         any = active->first;
@@ -1088,7 +1079,7 @@ glusterfs_handle_node_status (rpcsvc_request_t *req)
                 rsp.op_errstr = "";
 
         ret = dict_allocate_and_serialize (output, &rsp.output.output_val,
-                                           (size_t *)&rsp.output.output_len);
+                                           &rsp.output.output_len);
         if (ret) {
                 gf_log (THIS->name, GF_LOG_ERROR,
                         "Failed to serialize output dict to rsp");
@@ -1101,16 +1092,11 @@ glusterfs_handle_node_status (rpcsvc_request_t *req)
 out:
         if (dict)
                 dict_unref (dict);
-        if (node_req.input.input_val)
-                free (node_req.input.input_val);
-        if (msg)
-                GF_FREE (msg);
-        if (rsp.output.output_val)
-                GF_FREE (rsp.output.output_val);
-        if (node_name)
-                GF_FREE (node_name);
-        if (subvol_name)
-                GF_FREE (subvol_name);
+        free (node_req.input.input_val);
+        GF_FREE (msg);
+        GF_FREE (rsp.output.output_val);
+        GF_FREE (node_name);
+        GF_FREE (subvol_name);
 
         gf_log (THIS->name, GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
@@ -1154,7 +1140,7 @@ glusterfs_handle_nfs_profile (rpcsvc_request_t *req)
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         GF_ASSERT (ctx);
 
         active = ctx->active;
@@ -1186,7 +1172,7 @@ glusterfs_handle_nfs_profile (rpcsvc_request_t *req)
         rsp.op_errstr = "";
 
         ret = dict_allocate_and_serialize (output, &rsp.output.output_val,
-                                           (size_t *)&rsp.output.output_len);
+                                           &rsp.output.output_len);
         if (ret) {
                 gf_log (THIS->name, GF_LOG_ERROR,
                         "Failed to serialize output dict to rsp");
@@ -1197,14 +1183,12 @@ glusterfs_handle_nfs_profile (rpcsvc_request_t *req)
                                       (xdrproc_t)xdr_gd1_mgmt_brick_op_rsp);
 
 out:
-        if (nfs_req.input.input_val)
-                free (nfs_req.input.input_val);
+        free (nfs_req.input.input_val);
         if (dict)
                 dict_unref (dict);
         if (output)
                 dict_unref (output);
-        if (rsp.output.output_val)
-                GF_FREE (rsp.output.output_val);
+        GF_FREE (rsp.output.output_val);
 
         gf_log (THIS->name, GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
@@ -1470,6 +1454,9 @@ glusterfs_volfile_reconfigure (FILE *newvolfile_fp)
         }
         fwrite (oldvolfile, oldvollen, 1, oldvolfile_fp);
         fflush (oldvolfile_fp);
+        if (ferror (oldvolfile_fp)) {
+                goto out;
+        }
 
 
         oldvolfile_graph = glusterfs_graph_construct (oldvolfile_fp);
@@ -1495,13 +1482,7 @@ glusterfs_volfile_reconfigure (FILE *newvolfile_fp)
                 "Only options have changed in the new "
                 "graph");
 
-        ctx = glusterfs_ctx_get ();
-
-        if (!ctx) {
-                gf_log ("glusterfsd-mgmt", GF_LOG_ERROR,
-                        "glusterfs_ctx_get() returned NULL");
-                goto out;
-        }
+        ctx = glusterfsd_ctx;
 
         oldvolfile_graph = ctx->active;
 
@@ -1578,6 +1559,10 @@ mgmt_getspec_cbk (struct rpc_req *req, struct iovec *iov, int count,
 
         fwrite (rsp.spec, size, 1, tmpfp);
         fflush (tmpfp);
+        if (ferror (tmpfp)) {
+                ret = -1;
+                goto out;
+        }
 
         /*  Check if only options have changed. No need to reload the
         *  volfile if topology hasn't changed.
@@ -1617,8 +1602,7 @@ mgmt_getspec_cbk (struct rpc_req *req, struct iovec *iov, int count,
 out:
         STACK_DESTROY (frame->root);
 
-        if (rsp.spec)
-                free (rsp.spec);
+        free (rsp.spec);
 
         if (ret && ctx && !ctx->active) {
                 /* Do it only for the first time */
@@ -1689,8 +1673,7 @@ mgmt_event_notify_cbk (struct rpc_req *req, struct iovec *iov, int count,
                 goto out;
         }
 out:
-        if (rsp.dict.dict_val)
-                free (rsp.dict.dict_val); //malloced by xdr
+        free (rsp.dict.dict_val); //malloced by xdr
         return ret;
 
 }
@@ -1729,8 +1712,7 @@ glusterfs_rebalance_event_notify_cbk (struct rpc_req *req, struct iovec *iov,
                 goto out;
         }
 out:
-        if (rsp.dict.dict_val)
-                free (rsp.dict.dict_val); //malloced by xdr
+        free (rsp.dict.dict_val); //malloced by xdr
         return ret;
 
 }
@@ -1744,7 +1726,7 @@ glusterfs_rebalance_event_notify (dict_t *dict)
         cmd_args_t              *cmd_args = NULL;
         call_frame_t            *frame = NULL;
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         cmd_args = &ctx->cmd_args;
 
         frame = create_frame (THIS, ctx->pool);
@@ -1757,7 +1739,7 @@ glusterfs_rebalance_event_notify (dict_t *dict)
                         gf_log ("", GF_LOG_ERROR, "failed to set volname");
 
                 ret = dict_allocate_and_serialize (dict, &req.dict.dict_val,
-                                                (size_t *)&req.dict.dict_len);
+                                                   &req.dict.dict_len);
         }
 
         ret = mgmt_submit_request (&req, frame, ctx, &clnt_handshake_prog,
@@ -1765,8 +1747,7 @@ glusterfs_rebalance_event_notify (dict_t *dict)
                                    glusterfs_rebalance_event_notify_cbk,
                                    (xdrproc_t)xdr_gf_event_notify_req);
 
-        if (req.dict.dict_val)
-                GF_FREE (req.dict.dict_val);
+        GF_FREE (req.dict.dict_val);
 
         STACK_DESTROY (frame->root);
         return ret;
@@ -1994,9 +1975,10 @@ glusterfs_mgmt_init (glusterfs_ctx_t *ctx)
                 goto out;
         }
 
-        ret = rpcclnt_cbk_program_register (rpc, &mgmt_cbk_prog);
+        ret = rpcclnt_cbk_program_register (rpc, &mgmt_cbk_prog, THIS);
         if (ret) {
-                gf_log (THIS->name, GF_LOG_WARNING, "failed to register callback function");
+                gf_log (THIS->name, GF_LOG_WARNING,
+                        "failed to register callback function");
                 goto out;
         }
 
@@ -2080,7 +2062,7 @@ mgmt_pmap_signin_cbk (struct rpc_req *req, struct iovec *iov, int count,
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         cmd_args = &ctx->cmd_args;
 
         if (!cmd_args->brick_port2) {
@@ -2149,7 +2131,7 @@ mgmt_pmap_signout_cbk (struct rpc_req *req, struct iovec *iov, int count,
                 goto out;
         }
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         ret = xdr_to_generic (*iov, &rsp, (xdrproc_t)xdr_pmap_signout_rsp);
         if (ret < 0) {
                 gf_log (THIS->name, GF_LOG_ERROR, "XDR decoding failed");

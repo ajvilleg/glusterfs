@@ -45,7 +45,7 @@ cli_begin_xml_output (xmlTextWriterPtr *writer, xmlBufferPtr *buf)
         int             ret = -1;
 
         *buf = xmlBufferCreateSize (8192);
-        if (buf == NULL) {
+        if (*buf == NULL) {
                 ret = -1;
                 goto out;
         }
@@ -2493,8 +2493,7 @@ cont:
         ret = cli_end_xml_output (writer, buf);
 
 out:
-        if (size_str)
-                GF_FREE (size_str);
+        GF_FREE (size_str);
         gf_log ("cli", GF_LOG_DEBUG, "Returning %d", ret);
         return ret;
 }

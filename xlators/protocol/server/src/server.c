@@ -619,8 +619,7 @@ validate_auth_options (xlator_t *this, dict_t *dict)
         }
 
 out:
-        if (tmp_addr_list)
-                GF_FREE (tmp_addr_list);
+        GF_FREE (tmp_addr_list);
         return error;
 }
 
@@ -865,8 +864,7 @@ reconfigure (xlator_t *this, dict_t *options)
         /*ret = dict_get_str (options, "statedump-path", &statedump_path);
         if (!ret) {
                 gf_path_strip_trailing_slashes (statedump_path);
-                if (this->ctx->statedump_path)
-                        GF_FREE (this->ctx->statedump_path);
+                GF_FREE (this->ctx->statedump_path);
                 this->ctx->statedump_path = gf_strdup (statedump_path);
         }*/
         GF_OPTION_RECONF ("statedump-path", statedump_path,
@@ -878,8 +876,7 @@ reconfigure (xlator_t *this, dict_t *options)
                 goto out;
         }
         gf_path_strip_trailing_slashes (statedump_path);
-        if (this->ctx->statedump_path)
-                GF_FREE (this->ctx->statedump_path);
+        GF_FREE (this->ctx->statedump_path);
         this->ctx->statedump_path = gf_strdup (statedump_path);
 
         if (!conf->auth_modules)
@@ -1023,14 +1020,14 @@ init (xlator_t *this)
                 goto out;
         }
 
-        glusterfs3_1_fop_prog.options = this->options;
-        ret = rpcsvc_program_register (conf->rpc, &glusterfs3_1_fop_prog);
+        glusterfs3_3_fop_prog.options = this->options;
+        ret = rpcsvc_program_register (conf->rpc, &glusterfs3_3_fop_prog);
         if (ret) {
                 gf_log (this->name, GF_LOG_WARNING,
                         "registration of program (name:%s, prognum:%d, "
-                        "progver:%d) failed", glusterfs3_1_fop_prog.progname,
-                        glusterfs3_1_fop_prog.prognum,
-                        glusterfs3_1_fop_prog.progver);
+                        "progver:%d) failed", glusterfs3_3_fop_prog.progname,
+                        glusterfs3_3_fop_prog.prognum,
+                        glusterfs3_3_fop_prog.progver);
                 goto out;
         }
 
@@ -1042,7 +1039,7 @@ init (xlator_t *this)
                         "progver:%d) failed", gluster_handshake_prog.progname,
                         gluster_handshake_prog.prognum,
                         gluster_handshake_prog.progver);
-                rpcsvc_program_unregister (conf->rpc, &glusterfs3_1_fop_prog);
+                rpcsvc_program_unregister (conf->rpc, &glusterfs3_3_fop_prog);
                 goto out;
         }
 

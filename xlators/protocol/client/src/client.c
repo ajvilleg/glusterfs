@@ -1269,8 +1269,7 @@ client_set_remote_options (char *value, xlator_t *this)
 
         ret = _gf_true;
 out:
-        if (dup_value)
-                GF_FREE (dup_value);
+        GF_FREE (dup_value);
 
         return ret;
 }
@@ -2278,7 +2277,8 @@ client_init_rpc (xlator_t *this)
         conf->handshake = &clnt_handshake_prog;
         conf->dump      = &clnt_dump_prog;
 
-        ret = rpcclnt_cbk_program_register (conf->rpc, &gluster_cbk_prog);
+        ret = rpcclnt_cbk_program_register (conf->rpc, &gluster_cbk_prog,
+                                            this);
         if (ret) {
                 gf_log (this->name, GF_LOG_ERROR,
                         "failed to register callback program");

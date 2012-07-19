@@ -42,6 +42,7 @@ Packager: @PACKAGE_BUGREPORT@
 URL: http://www.gluster.org/docs/index.php/GlusterFS
 Source0: @PACKAGE_NAME@-@PACKAGE_VERSION@.tar.gz
 BuildRoot: %(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
+Requires: openssl >= 1.0
 Requires(post): /sbin/chkconfig
 Requires(preun): /sbin/service, /sbin/chkconfig
 Requires(postun): /sbin/service
@@ -54,7 +55,7 @@ BuildRequires: python-ctypes
 %if 0%{?suse_version}
 BuildRequires: python-devel
 %endif
-Requires: openssl
+BuildRequires: openssl-devel >= 1.0
 
 Obsoletes:        %{name}-libs <= 2.0.0
 Obsoletes:        %{name}-common < %{version}-%{release}
@@ -232,6 +233,23 @@ sed -i 's|option working-directory /etc/glusterd|option working-directory %{_sha
 %{__install} -p -m 0644 extras/hook-scripts/*.sh   \
     %{buildroot}%{_sharedstatedir}/glusterd/hook-scripts/
 
+# Create directories and files that get created during runtime. This should
+# not be needed for files marged as "ghost", but rpm-4.9 is broken in this
+# respect :-(
+# - see also https://bugzilla.redhat.com/show_bug.cgi?id=839656
+touch %{buildroot}%{_sharedstatedir}/glusterd/glusterd.info
+%{__mkdir_p} %{buildroot}%{_sharedstatedir}/glusterd/glustershd
+%{__mkdir_p} %{buildroot}%{_sharedstatedir}/glusterd/hooks/1/{add-brick,create,delete,set,start,stop,remove,remove-brick}/{pre,post}
+%{__mkdir_p} %{buildroot}%{_sharedstatedir}/glusterd/nfs
+%{__mkdir_p} %{buildroot}%{_sharedstatedir}/glusterd/peers
+%{__mkdir_p} %{buildroot}%{_sharedstatedir}/glusterd/vols
+%if 0%{?_can_georeplicate}
+%if 0%{!?_without_georeplication:1}
+%{__mkdir_p} %{buildroot}%{_sharedstatedir}/glusterd/geo-replication
+touch %{buildroot}%{_sharedstatedir}/glusterd/geo-replication/gsyncd.conf
+%endif
+%endif
+
 # Clean up the examples we want to include as %%doc
 #%{__cp} -a doc/examples examples
 #%{__rm} -f examples/Makefile*
@@ -355,6 +373,7 @@ fi
 
 %files server
 %defattr(-,root,root,-)
+%doc extras/clear_xattrs.sh
 #%doc examples/ doc/glusterfs*.vol.sample
 %config(noreplace) %{_sysconfdir}/glusterfs
 %{_sysconfdir}/init.d/glusterd
@@ -401,10 +420,14 @@ fi
 %files devel
 %defattr(-,root,root,-)
 %{_includedir}/glusterfs
+%{_libdir}/pkgconfig/glusterfs-api.pc
 %exclude %{_includedir}/glusterfs/y.tab.h
 %{_libdir}/*.so
 
 %changelog
+* Tue Jul 10 2012 Niels de Vos <ndevos@redhat.com>
+- Include extras/clear_xattrs.sh in the glusterfs-server sub-package
+
 * Thu Jun 07 2012 Niels de Vos <ndevos@redhat.com>
 - Mark /var/lib/glusterd as owned by glusterfs, subdirs belong to -server
 

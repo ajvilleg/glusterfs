@@ -324,10 +324,10 @@ make_georep_mountspec (gf_mount_spec_t *mspec, const char *volnames,
         fa[2] = georep_mnt_desc;
 
         for (i = 0; i < 3; i++) {
-                if (fa[i])
-                        GF_FREE (fa[i]);
-                else
+                if (fa[i] == NULL)
                         ret = -1;
+                else
+                        GF_FREE (fa[i]);
         }
 
         return ret;
@@ -697,8 +697,7 @@ glusterd_do_mount (char *label, dict_t *argdict, char **path, int *op_errno)
                 *path = cookie;
         }
 
-        if (mtptemp)
-                GF_FREE (mtptemp);
+        GF_FREE (mtptemp);
 
         return ret;
 }

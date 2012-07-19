@@ -187,8 +187,7 @@ _posix_xattr_get_set (dict_t *xattr_req,
                 err:
                         if (_fd != -1)
                                 close (_fd);
-                        if (databuf)
-                                GF_FREE (databuf);
+                        GF_FREE (databuf);
                 }
         } else if (!strcmp (key, GLUSTERFS_OPEN_FD_COUNT)) {
                 loc = filler->loc;
@@ -214,16 +213,25 @@ _posix_xattr_get_set (dict_t *xattr_req,
                         if (!value)
                                 return;
 
-                        sys_lgetxattr (filler->real_path, key, value,
-                                       xattr_size);
+                        xattr_size = sys_lgetxattr (filler->real_path, key, value,
+                                                    xattr_size);
+                        if (xattr_size <= 0) {
+                                gf_log (filler->this->name, GF_LOG_WARNING,
+                                        "getxattr failed. path: %s, key: %s",
+                                        filler->real_path, key);
+                                GF_FREE (value);
+                                return;
+                        }
 
                         value[xattr_size] = '\0';
                         ret = dict_set_bin (filler->xattr, key,
                                             value, xattr_size);
-                        if (ret < 0)
+                        if (ret < 0) {
                                 gf_log (filler->this->name, GF_LOG_DEBUG,
                                         "dict set failed. path: %s, key: %s",
                                         filler->real_path, key);
+                                GF_FREE (value);
+                        }
                 }
         }
 out:
@@ -235,14 +243,17 @@ int
 posix_fill_gfid_path (xlator_t *this, const char *path, struct iatt *iatt)
 {
         int ret = 0;
+        ssize_t size = 0;
 
         if (!iatt)
                 return 0;
 
-        ret = sys_lgetxattr (path, GFID_XATTR_KEY, iatt->ia_gfid, 16);
+        size = sys_lgetxattr (path, GFID_XATTR_KEY, iatt->ia_gfid, 16);
         /* Return value of getxattr */
-        if ((ret == 16) || (ret == -1))
+        if ((size == 16) || (size == -1))
                 ret = 0;
+        else
+                ret = size;
 
         return ret;
 }
@@ -252,14 +263,17 @@ int
 posix_fill_gfid_fd (xlator_t *this, int fd, struct iatt *iatt)
 {
         int ret = 0;
+        ssize_t size = 0;
 
         if (!iatt)
                 return 0;
 
-        ret = sys_fgetxattr (fd, GFID_XATTR_KEY, iatt->ia_gfid, 16);
+        size = sys_fgetxattr (fd, GFID_XATTR_KEY, iatt->ia_gfid, 16);
         /* Return value of getxattr */
-        if ((ret == 16) || (ret == -1))
+        if ((size == 16) || (size == -1))
                 ret = 0;
+        else
+                ret = size;
 
         return ret;
 }
@@ -443,6 +457,7 @@ posix_gfid_set (xlator_t *this, const char *path, loc_t *loc, dict_t *xattr_req)
         void        *uuid_req = NULL;
         uuid_t       uuid_curr;
         int          ret = 0;
+        ssize_t      size = 0;
         struct stat  stat = {0, };
 
 
@@ -452,8 +467,8 @@ posix_gfid_set (xlator_t *this, const char *path, loc_t *loc, dict_t *xattr_req)
         if (sys_lstat (path, &stat) != 0)
                 goto out;
 
-        ret = sys_lgetxattr (path, GFID_XATTR_KEY, uuid_curr, 16);
-        if (ret == 16) {
+        size = sys_lgetxattr (path, GFID_XATTR_KEY, uuid_curr, 16);
+        if (size == 16) {
                 ret = 0;
                 goto verify_handle;
         }
@@ -630,8 +645,7 @@ posix_get_file_contents (xlator_t *this, uuid_t pargfid,
 
 out:
         if (op_ret < 0) {
-                if (*contents)
-                        GF_FREE (*contents);
+                GF_FREE (*contents);
                 if (file_fd != -1)
                         close (file_fd);
         }
@@ -1051,5 +1065,29 @@ int
 posix_fd_ctx_get_off (fd_t *fd, xlator_t *this, struct posix_fd **pfd,
                       off_t offset)
 {
-        return posix_fd_ctx_get (fd, this, pfd);
+        int   ret;
+        int   flags;
+
+        LOCK (&fd->inode->lock);
+        {
+                ret = __posix_fd_ctx_get (fd, this, pfd);
+                if (ret)
+                        goto unlock;
+
+                if ((offset & 0xfff) && (*pfd)->odirect) {
+                        flags = fcntl ((*pfd)->fd, F_GETFL);
+                        ret = fcntl ((*pfd)->fd, F_SETFL, (flags & (~O_DIRECT)));
+                        (*pfd)->odirect = 0;
+                }
+
+                if (((offset & 0xfff) == 0) && (!(*pfd)->odirect)) {
+                        flags = fcntl ((*pfd)->fd, F_GETFL);
+                        ret = fcntl ((*pfd)->fd, F_SETFL, (flags | O_DIRECT));
+                        (*pfd)->odirect = 1;
+                }
+        }
+unlock:
+        UNLOCK (&fd->inode->lock);
+
+        return ret;
 }

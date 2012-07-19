@@ -392,8 +392,9 @@ out:
 /* Obtain a backtrace and print it to stdout. */
 /* TODO: It looks like backtrace_symbols allocates memory,
    it may be problem because mostly memory allocation/free causes 'sigsegv' */
+
 void
-gf_print_trace (int32_t signum)
+gf_print_trace (int32_t signum, glusterfs_ctx_t *ctx)
 {
         extern FILE *gf_log_logfile;
         char         msg[1024] = {0,};
@@ -409,7 +410,6 @@ gf_print_trace (int32_t signum)
                 goto out;
 
         {
-                glusterfs_ctx_t *ctx = glusterfs_ctx_get ();
                 struct list_head *trav = ((call_pool_t *)ctx->pool)->all_frames.next;
                 while (trav != (&((call_pool_t *)ctx->pool)->all_frames)) {
                         call_frame_t *tmp = (call_frame_t *)(&((call_stack_t *)trav)->frames);
@@ -602,8 +602,7 @@ gf_strstr (const char *str, const char *delim, const char *match)
         }
 
 out:
-        if (tmp_str)
-                free (tmp_str);
+        free (tmp_str);
 
         return ret;
 
@@ -1684,8 +1683,7 @@ valid_host_name (char *address, int length)
         }
 
 out:
-        if (dup_addr)
-                GF_FREE (dup_addr);
+        GF_FREE (dup_addr);
         return ret;
 }
 
@@ -1916,8 +1914,7 @@ gf_is_str_int (const char *value)
         }
 
 out:
-        if (fptr)
-                GF_FREE (fptr);
+        GF_FREE (fptr);
 
         return flag;
 }
@@ -2126,8 +2123,7 @@ gf_canonicalize_path (char *path)
                 gf_log ("common-utils", GF_LOG_ERROR,
                         "Path manipulation failed");
 
-        if (tmppath)
-                GF_FREE(tmppath);
+        GF_FREE(tmppath);
 
         return ret;
 }
@@ -2152,5 +2148,38 @@ _gf_timestuff (gf_timefmts *fmt, const char ***fmts, const char ***zeros)
         *fmt = gf_timefmt_last;
         *fmts = __gf_timefmts;
         *zeros = __gf_zerotimes;
+}
+
+
+char *
+generate_glusterfs_ctx_id (void)
+{
+        char           tmp_str[1024] = {0,};
+        char           hostname[256] = {0,};
+        struct timeval tv = {0,};
+        char           now_str[32];
+
+        if (gettimeofday (&tv, NULL) == -1) {
+                gf_log ("glusterfsd", GF_LOG_ERROR,
+                        "gettimeofday: failed %s",
+                        strerror (errno));
+        }
+
+        if (gethostname (hostname, 256) == -1) {
+                gf_log ("glusterfsd", GF_LOG_ERROR,
+                        "gethostname: failed %s",
+                        strerror (errno));
+        }
+
+        gf_time_fmt (now_str, sizeof now_str, tv.tv_sec, gf_timefmt_Ymd_T);
+        snprintf (tmp_str, sizeof tmp_str, "%s-%d-%s:%"
+#ifdef GF_DARWIN_HOST_OS
+                  PRId32,
+#else
+                  "ld",
+#endif
+                  hostname, getpid(), now_str, tv.tv_usec);
+
+        return gf_strdup (tmp_str);
 }
 

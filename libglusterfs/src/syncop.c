@@ -133,8 +133,7 @@ synctask_destroy (struct synctask *task)
         if (!task)
                 return;
 
-        if (task->stack)
-                FREE (task->stack);
+        FREE (task->stack);
 
         if (task->opframe)
                 STACK_DESTROY (task->opframe->root);
@@ -243,8 +242,7 @@ synctask_new (struct syncenv *env, synctask_fn_t fn, synctask_cbk_t cbk,
         return ret;
 err:
         if (newtask) {
-                if (newtask->stack)
-                        FREE (newtask->stack);
+                FREE (newtask->stack);
                 if (newtask->opframe)
                         STACK_DESTROY (newtask->opframe->root);
                 FREE (newtask);
@@ -983,8 +981,7 @@ syncop_readv (xlator_t *subvol, fd_t *fd, size_t size, off_t off,
 
         if (vector)
                 *vector = args.vector;
-        else if (args.vector)
-                GF_FREE (args.vector);
+        else GF_FREE (args.vector);
 
         if (count)
                 *count = args.count;
@@ -1018,14 +1015,15 @@ syncop_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 }
 
 int
-syncop_writev (xlator_t *subvol, fd_t *fd, struct iovec *vector,
+syncop_writev (xlator_t *subvol, fd_t *fd, const struct iovec *vector,
                int32_t count, off_t offset, struct iobref *iobref,
                uint32_t flags)
 {
         struct syncargs args = {0, };
 
         SYNCOP (subvol, (&args), syncop_writev_cbk, subvol->fops->writev,
-                fd, vector, count, offset, flags, iobref, NULL);
+                fd, (struct iovec *) vector, count, offset, flags, iobref,
+		NULL);
 
         errno = args.op_errno;
         return args.op_ret;
@@ -1224,6 +1222,37 @@ syncop_fsync (xlator_t *subvol, fd_t *fd)
 
 }
 
+
+int
+syncop_flush_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
+                  int32_t op_ret, int32_t op_errno, dict_t *xdata)
+{
+        struct syncargs *args = NULL;
+
+        args = cookie;
+
+        args->op_ret   = op_ret;
+        args->op_errno = op_errno;
+
+        __wake (args);
+
+        return 0;
+
+}
+
+int
+syncop_flush (xlator_t *subvol, fd_t *fd)
+{
+        struct syncargs args = {0};
+
+        SYNCOP (subvol, (&args), syncop_flush_cbk, subvol->fops->flush,
+                fd, NULL);
+
+        errno = args.op_errno;
+        return args.op_ret;
+
+}
+
 int
 syncop_fstat_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                   int32_t op_ret, int32_t op_errno, struct iatt *stbuf, dict_t *xdata)
@@ -1336,8 +1365,7 @@ syncop_readlink (xlator_t *subvol, loc_t *loc, char **buffer, size_t size)
 
         if (buffer)
                 *buffer = args.buffer;
-        else if (args.buffer)
-                GF_FREE (args.buffer);
+        else GF_FREE (args.buffer);
 
         errno = args.op_errno;
         return args.op_ret;

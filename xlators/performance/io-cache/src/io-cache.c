@@ -313,6 +313,18 @@ ioc_forget (xlator_t *this, inode_t *inode)
         return 0;
 }
 
+static int32_t
+ioc_invalidate(xlator_t *this, inode_t *inode)
+{
+	ioc_inode_t *ioc_inode = NULL;
+
+	inode_ctx_get(inode, this, (uint64_t *) &ioc_inode);
+
+	if (ioc_inode)
+		ioc_inode_flush(ioc_inode);
+
+	return 0;
+}
 
 /*
  * ioc_cache_validate_cbk -
@@ -1483,13 +1495,9 @@ ioc_get_priority_list (const char *opt_str, struct list_head *first)
                 stripe_str = strtok_r (NULL, ",", &tmp_str);
         }
 out:
-        if (string != NULL) {
-                GF_FREE (string);
-        }
+        GF_FREE (string);
 
-        if (dup_str != NULL) {
-                GF_FREE (dup_str);
-        }
+        GF_FREE (dup_str);
 
         if (max_pri == -1) {
                 list_for_each_entry_safe (curr, tmp, first, list) {
@@ -1977,7 +1985,8 @@ struct xlator_dumpops dumpops = {
 
 struct xlator_cbks cbks = {
         .forget      = ioc_forget,
-        .release     = ioc_release
+        .release     = ioc_release,
+	.invalidate  = ioc_invalidate,
 };
 
 struct volume_options options[] = {

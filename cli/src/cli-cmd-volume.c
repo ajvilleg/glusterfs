@@ -317,13 +317,11 @@ found_bad_brick_order:
 out:
         ai_list_tmp2 = NULL;
         i = 0;
-        if (brick_list_dup)
-                GF_FREE (brick_list_dup);
+        GF_FREE (brick_list_dup);
         list_for_each_entry (ai_list_tmp1, &ai_list->list, list) {
                 if (ai_list_tmp1->info)
                         freeaddrinfo (ai_list_tmp1->info);
-                if (ai_list_tmp2)
-                        free (ai_list_tmp2);
+                free (ai_list_tmp2);
                 ai_list_tmp2 = ai_list_tmp1;
         }
         free (ai_list_tmp2);
@@ -545,7 +543,7 @@ cli_cmd_get_confirmation (struct cli_state *state, const char *question)
 {
         char                    answer[5] = {'\0', };
         char                    flush = '\0';
-	int			len = 0;
+        size_t			len;
 
         if (state->mode & GLUSTER_MODE_SCRIPT)
                 return GF_ANSWER_YES;
@@ -559,7 +557,7 @@ cli_cmd_get_confirmation (struct cli_state *state, const char *question)
 
 	len = strlen (answer);
 
-	if (answer [len - 1] == '\n'){
+	if (len && answer [len - 1] == '\n'){
 		answer [--len] = '\0';
 	} else {
 		do{
@@ -1582,21 +1580,16 @@ int
 cli_print_brick_status (cli_volume_status_t *status)
 {
         int  fieldlen = CLI_VOL_STATUS_BRICK_LEN;
-        char buf[80] = {0,};
         int  bricklen = 0;
-        int  i = 0;
         char *p = NULL;
         int  num_tabs = 0;
 
-        bricklen = strlen (status->brick);
         p = status->brick;
+        bricklen = strlen (p);
         while (bricklen > 0) {
                 if (bricklen > fieldlen) {
-                        i++;
-                        strncpy (buf, p, min (fieldlen, (sizeof (buf)-1)));
-                        buf[strlen(buf) + 1] = '\0';
-                        cli_out ("%s", buf);
-                        p = status->brick + i * fieldlen;
+                        cli_out ("%.*s", fieldlen, p);
+                        p += fieldlen;
                         bricklen -= fieldlen;
                 } else {
                         num_tabs = (fieldlen - bricklen) / CLI_TAB_LENGTH + 1;

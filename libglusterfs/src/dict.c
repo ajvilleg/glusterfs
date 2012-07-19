@@ -181,8 +181,7 @@ data_copy (data_t *old)
 
 err_out:
 
-        if (newdata->data)
-                FREE (newdata->data);
+        FREE (newdata->data);
         mem_put (newdata);
 
         return NULL;
@@ -436,10 +435,8 @@ dict_destroy (dict_t *this)
                 mem_put (this->members);
         }
 
-        if (this->extra_free)
-                GF_FREE (this->extra_free);
-        if (this->extra_stdfree)
-                free (this->extra_stdfree);
+        GF_FREE (this->extra_free);
+        free (this->extra_stdfree);
 
         if (!this->is_static)
                 mem_put (this);
@@ -2486,7 +2483,7 @@ out:
  */
 
 int32_t
-dict_allocate_and_serialize (dict_t *this, char **buf, size_t *length)
+dict_allocate_and_serialize (dict_t *this, char **buf, u_int *length)
 {
         int           ret    = -EINVAL;
         ssize_t       len = 0;

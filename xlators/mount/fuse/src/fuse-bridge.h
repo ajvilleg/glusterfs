@@ -55,6 +55,7 @@
 #include "list.h"
 #include "dict.h"
 #include "syncop.h"
+#include "gidcache.h"
 
 #if defined(GF_LINUX_HOST_OS) || defined(__NetBSD__)
 #define FUSE_OP_HIGH (FUSE_POLL + 1)
@@ -109,7 +110,10 @@ struct fuse_private {
         gf_boolean_t         acl;
         gf_boolean_t         selinux;
         gf_boolean_t         read_only;
+	gf_boolean_t	     fopen_keep_cache;
+	int32_t		     gid_cache_timeout;
         fdtable_t           *fdtable;
+	gid_cache_t	     gid_cache;
 
         /* For fuse-reverse-validation */
         int                  revchan_in;
@@ -359,4 +363,5 @@ int fuse_resolve_entry_init (fuse_state_t *state, fuse_resolve_t *resolve,
 			     ino_t par, char *name);
 int fuse_resolve_fd_init (fuse_state_t *state, fuse_resolve_t *resolve,
 			  fd_t *fd);
+int fuse_ignore_xattr_set (fuse_private_t *priv, char *key);
 #endif /* _GF_FUSE_BRIDGE_H_ */

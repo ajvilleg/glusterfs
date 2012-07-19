@@ -134,8 +134,7 @@ __dentry_unset (dentry_t *dentry)
 
         list_del_init (&dentry->inode_list);
 
-        if (dentry->name)
-                GF_FREE (dentry->name);
+        GF_FREE (dentry->name);
 
         if (dentry->parent) {
                 __inode_unref (dentry->parent);
@@ -950,6 +949,54 @@ inode_forget (inode_t *inode, uint64_t nlookup)
         return 0;
 }
 
+/*
+ * Invalidate an inode. This is invoked when a translator decides that an inode's
+ * cache is no longer valid. Any translator interested in taking action in this
+ * situation can define the invalidate callback.
+ */
+int
+inode_invalidate(inode_t *inode)
+{
+	int ret = 0;
+	xlator_t *xl = NULL;
+	xlator_t *old_THIS = NULL;
+
+	if (!inode) {
+		gf_log_callingfn(THIS->name, GF_LOG_WARNING, "inode not found");
+		return -1;
+	}
+
+	/*
+	 * The master xlator is not in the graph but it can define an invalidate
+	 * handler.
+	 */
+	xl = inode->table->xl->ctx->master;
+	if (xl && xl->cbks->invalidate) {
+		old_THIS = THIS;
+		THIS = xl;
+		ret = xl->cbks->invalidate(xl, inode);
+		THIS = old_THIS;
+		if (ret)
+			return ret;
+	}
+
+	xl = inode->table->xl->graph->first;
+	while (xl) {
+		old_THIS = THIS;
+		THIS = xl;
+		if (xl->cbks->invalidate)
+			ret = xl->cbks->invalidate(xl, inode);
+		THIS = old_THIS;
+
+		if (ret)
+			break;
+
+		xl = xl->next;
+	}
+
+	return ret;
+}
+
 
 static void
 __inode_unlink (inode_t *inode, inode_t *parent, const char *name)
@@ -1157,9 +1204,7 @@ __inode_path (inode_t *inode, const char *name, char **bufp)
 out:
         if (__is_root_gfid (inode->gfid) && !name) {
                 ret = 1;
-                if (buf) {
-                        GF_FREE (buf);
-                }
+                GF_FREE (buf);
                 buf = GF_CALLOC (ret + 1, sizeof (char), gf_common_mt_char);
                 if (buf) {
                         strcpy (buf, "/");
@@ -1337,10 +1382,8 @@ inode_table_new (size_t lru_limit, xlator_t *xl)
 out:
         if (ret) {
                 if (new) {
-                        if (new->inode_hash)
-                                GF_FREE (new->inode_hash);
-                        if (new->name_hash)
-                                GF_FREE (new->name_hash);
+                        GF_FREE (new->inode_hash);
+                        GF_FREE (new->name_hash);
                         if (new->dentry_pool)
                                 mem_pool_destroy (new->dentry_pool);
                         if (new->inode_pool)
@@ -1406,8 +1449,7 @@ inode_from_path (inode_table_t *itable, const char *path)
         if (parent)
                 inode_unref (parent);
 
-        if (pathname)
-                GF_FREE (pathname);
+        GF_FREE (pathname);
 
 out:
         return inode;
@@ -1619,9 +1661,7 @@ unlock:
                 }
         }
 
-        if (inode_ctx != NULL) {
-                GF_FREE (inode_ctx);
-        }
+        GF_FREE (inode_ctx);
 
         return;
 }

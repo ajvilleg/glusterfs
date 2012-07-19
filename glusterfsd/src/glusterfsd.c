@@ -168,6 +168,8 @@ static struct argp_option gf_options[] = {
          "Brick name to be registered with Gluster portmapper" },
         {"brick-port", ARGP_BRICK_PORT_KEY, "BRICK-PORT", OPTION_HIDDEN,
          "Brick Port to be registered with Gluster portmapper" },
+	{"fopen-keep-cache", ARGP_FOPEN_KEEP_CACHE_KEY, 0, 0,
+	 "Do not purge the cache on file open"},
 
         {0, 0, 0, 0, "Fuse options:"},
         {"direct-io-mode", ARGP_DIRECT_IO_MODE_KEY, "BOOL", OPTION_ARG_OPTIONAL,
@@ -179,6 +181,9 @@ static struct argp_option gf_options[] = {
         {"attribute-timeout", ARGP_ATTRIBUTE_TIMEOUT_KEY, "SECONDS", 0,
          "Set attribute timeout to SECONDS for inodes in fuse kernel module "
          "[default: 1]"},
+	{"gid-timeout", ARGP_GID_TIMEOUT_KEY, "SECONDS", 0,
+	 "Set auxilary group list timeout to SECONDS for fuse translator "
+	 "[default: 0]"},
         {"client-pid", ARGP_CLIENT_PID_KEY, "PID", OPTION_HIDDEN,
          "client will authenticate itself with process id PID to server"},
         {"user-map-root", ARGP_USER_MAP_ROOT_KEY, "USER", OPTION_HIDDEN,
@@ -368,6 +373,27 @@ create_fuse_mount (glusterfs_ctx_t *ctx)
                 }
         }
 
+	if (cmd_args->fopen_keep_cache) {
+		ret = dict_set_static_ptr(master->options, "fopen-keep-cache",
+			"on");
+		if (ret < 0) {
+			gf_log("glusterfsd", GF_LOG_ERROR,
+				"failed to set dict value for key "
+				"fopen-keep-cache");
+			goto err;
+		}
+	}
+
+	if (cmd_args->gid_timeout) {
+		ret = dict_set_int32(master->options, "gid-timeout",
+			cmd_args->gid_timeout);
+		if (ret < 0) {
+			gf_log("glusterfsd", GF_LOG_ERROR, "failed to set dict "
+				"value for key gid-timeout");
+			goto err;
+		}
+	}
+
         switch (cmd_args->fuse_direct_io_mode) {
         case GF_OPTION_DISABLE: /* disable */
                 ret = dict_set_static_ptr (master->options, ZR_DIRECT_IO_OPT,
@@ -466,7 +492,7 @@ gf_remember_xlator_option (struct list_head *options, char *arg)
         char                    *dot = NULL;
         char                    *equals = NULL;
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         cmd_args = &ctx->cmd_args;
 
         option = GF_CALLOC (1, sizeof (xlator_cmdline_option_t),
@@ -518,12 +544,9 @@ gf_remember_xlator_option (struct list_head *options, char *arg)
 out:
         if (ret == -1) {
                 if (option) {
-                        if (option->volume)
-                                GF_FREE (option->volume);
-                        if (option->key)
-                                GF_FREE (option->key);
-                        if (option->value)
-                                GF_FREE (option->value);
+                        GF_FREE (option->volume);
+                        GF_FREE (option->key);
+                        GF_FREE (option->value);
 
                         GF_FREE (option);
                 }
@@ -537,7 +560,6 @@ out:
 static error_t
 parse_opts (int key, char *arg, struct argp_state *state)
 {
-        glusterfs_ctx_t *ctx        = NULL;
         cmd_args_t   *cmd_args      = NULL;
         uint32_t      n             = 0;
         double        d             = 0.0;
@@ -602,8 +624,7 @@ parse_opts (int key, char *arg, struct argp_state *state)
                 break;
 
         case ARGP_VOLUME_FILE_KEY:
-                if (cmd_args->volfile)
-                        GF_FREE (cmd_args->volfile);
+                GF_FREE (cmd_args->volfile);
 
                 if (arg[0] != '/') {
                         pwd = getcwd (NULL, PATH_MAX);
@@ -811,10 +832,20 @@ parse_opts (int key, char *arg, struct argp_state *state)
 
         case ARGP_MEM_ACCOUNTING_KEY:
                 /* TODO: it should have got handled much earlier */
-                ctx = glusterfs_ctx_get ();
-                ctx->mem_accounting = 1;
+		gf_mem_acct_enable_set ();
                 break;
-        }
+
+	case ARGP_FOPEN_KEEP_CACHE_KEY:
+		cmd_args->fopen_keep_cache = 1;
+		break;
+
+	case ARGP_GID_TIMEOUT_KEY:
+		if (!gf_string2int(arg, &cmd_args->gid_timeout))
+			break;
+
+		argp_failure(state, -1, 0, "unknown group list timeout %s", arg);
+		break;
+	}
 
         return 0;
 }
@@ -826,7 +857,7 @@ cleanup_and_exit (int signum)
         glusterfs_ctx_t *ctx      = NULL;
         xlator_t        *trav     = NULL;
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
 
         if (!ctx)
                 return;
@@ -885,7 +916,7 @@ reincarnate (int signum)
         glusterfs_ctx_t    *ctx = NULL;
         cmd_args_t         *cmd_args = NULL;
 
-        ctx = glusterfs_ctx_get ();
+        ctx = glusterfsd_ctx;
         cmd_args = &ctx->cmd_args;
 
         if (cmd_args->volfile_server) {
@@ -905,34 +936,6 @@ reincarnate (int signum)
                         "volume initialization failed.");
 
         return;
-}
-
-
-static char *
-generate_uuid ()
-{
-        char           tmp_str[1024] = {0,};
-        char           hostname[256] = {0,};
-        struct timeval tv = {0,};
-        char           now_str[32];
-
-        if (gettimeofday (&tv, NULL) == -1) {
-                gf_log ("glusterfsd", GF_LOG_ERROR,
-                        "gettimeofday: failed %s",
-                        strerror (errno));
-        }
-
-        if (gethostname (hostname, sizeof hostname) == -1) {
-                gf_log ("glusterfsd", GF_LOG_ERROR,
-                        "gethostname: failed %s",
-                        strerror (errno));
-        }
-
-        gf_time_fmt (now_str, sizeof now_str, tv.tv_sec, gf_timefmt_Ymd_T);
-        snprintf (tmp_str, sizeof tmp_str, "%s-%d-%s:%" GF_PRI_SUSECONDS,
-                  hostname, getpid(), now_str, tv.tv_usec);
-
-        return gf_strdup (tmp_str);
 }
 
 
@@ -1031,7 +1034,7 @@ glusterfs_ctx_defaults_init (glusterfs_ctx_t *ctx)
 
         xlator_mem_acct_init (THIS, gfd_mt_end);
 
-        ctx->process_uuid = generate_uuid ();
+        ctx->process_uuid = generate_glusterfs_ctx_id ();
         if (!ctx->process_uuid) {
                 gf_log ("", GF_LOG_CRITICAL,
                         "ERROR: glusterfs uuid generation failed");
@@ -1185,12 +1188,12 @@ logging_init (glusterfs_ctx_t *ctx)
 }
 
 void
-gf_check_and_set_mem_acct (int argc, char *argv[], glusterfs_ctx_t *ctx)
+gf_check_and_set_mem_acct (int argc, char *argv[])
 {
         int i = 0;
         for (i = 0; i < argc; i++) {
                 if (strcmp (argv[i], "--mem-accounting") == 0) {
-                        ctx->mem_accounting = 1;
+			gf_mem_acct_enable_set ();
                         break;
                 }
         }
@@ -1458,10 +1461,10 @@ glusterfs_sigwaiter (void *arg)
                         reincarnate (sig);
                         break;
                 case SIGUSR1:
-                        gf_proc_dump_info (sig);
+                        gf_proc_dump_info (sig, glusterfsd_ctx);
                         break;
                 case SIGUSR2:
-                        gf_latency_toggle (sig);
+                        gf_latency_toggle (sig, glusterfsd_ctx);
                         break;
                 default:
 
@@ -1470,6 +1473,13 @@ glusterfs_sigwaiter (void *arg)
         }
 
         return NULL;
+}
+
+
+void
+glusterfsd_print_trace (int signum)
+{
+	gf_print_trace (signum, glusterfsd_ctx);
 }
 
 
@@ -1482,12 +1492,12 @@ glusterfs_signals_setup (glusterfs_ctx_t *ctx)
         sigemptyset (&set);
 
         /* common setting for all threads */
-        signal (SIGSEGV, gf_print_trace);
-        signal (SIGABRT, gf_print_trace);
-        signal (SIGILL, gf_print_trace);
-        signal (SIGTRAP, gf_print_trace);
-        signal (SIGFPE, gf_print_trace);
-        signal (SIGBUS, gf_print_trace);
+        signal (SIGSEGV, glusterfsd_print_trace);
+        signal (SIGABRT, glusterfsd_print_trace);
+        signal (SIGILL, glusterfsd_print_trace);
+        signal (SIGTRAP, glusterfsd_print_trace);
+        signal (SIGFPE, glusterfsd_print_trace);
+        signal (SIGBUS, glusterfsd_print_trace);
         signal (SIGINT, cleanup_and_exit);
         signal (SIGPIPE, SIG_IGN);
 
@@ -1499,7 +1509,7 @@ glusterfs_signals_setup (glusterfs_ctx_t *ctx)
 
         ret = pthread_sigmask (SIG_BLOCK, &set, NULL);
         if (ret) {
-                gf_log ("", GF_LOG_WARNING,
+                gf_log ("glusterfsd", GF_LOG_WARNING,
                         "failed to execute pthread_signmask  %s",
                         strerror (errno));
                 return ret;
@@ -1513,7 +1523,7 @@ glusterfs_signals_setup (glusterfs_ctx_t *ctx)
                   fallback to signals getting handled by other threads.
                   setup the signal handlers
                 */
-                gf_log ("", GF_LOG_WARNING,
+                gf_log ("glusterfsd", GF_LOG_WARNING,
                         "failed to create pthread  %s",
                         strerror (errno));
                 return ret;
@@ -1662,6 +1672,9 @@ out:
 }
 
 
+/* This is the only legal global pointer  */
+glusterfs_ctx_t *glusterfsd_ctx;
+
 int
 main (int argc, char *argv[])
 {
@@ -1672,16 +1685,20 @@ main (int argc, char *argv[])
         if (ret)
                 return ret;
 
-        ctx = glusterfs_ctx_get ();
+#ifndef DEBUG
+        /* Enable memory accounting on the fly based on argument */
+        gf_check_and_set_mem_acct (argc, argv);
+#endif
+
+	ctx = glusterfs_ctx_new ();
         if (!ctx) {
                 gf_log ("glusterfs", GF_LOG_CRITICAL,
                         "ERROR: glusterfs context not initialized");
                 return ENOMEM;
         }
-#ifndef DEBUG
-        /* Enable memory accounting on the fly based on argument */
-        gf_check_and_set_mem_acct (argc, argv, ctx);
-#endif
+	glusterfsd_ctx = ctx;
+	THIS->ctx = ctx;
+
         ret = glusterfs_ctx_defaults_init (ctx);
         if (ret)
                 goto out;

@@ -45,6 +45,9 @@ server_statfs_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_WARNING,
                         "%"PRId64": STATFS (%s)",
@@ -54,9 +57,6 @@ server_statfs_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_statfs_from_statfs (&rsp.statfs, buf);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -65,8 +65,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_statfs_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -104,6 +103,9 @@ server_lookup_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_stat_from_iatt (&rsp.postparent, postparent);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 if (state->is_revalidate && op_errno == ENOENT) {
                         if (!__is_root_gfid (state->resolve.gfid)) {
@@ -136,9 +138,6 @@ server_lookup_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 }
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret   = op_ret;
         rsp.op_errno = gf_errno_to_error (op_errno);
@@ -165,8 +164,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_lookup_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -183,6 +181,9 @@ server_lk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret) {
                 if ((op_errno != ENOSYS) && (op_errno != EAGAIN)) {
@@ -213,9 +214,6 @@ server_lk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_proto_flock_from_flock (&rsp.flock, lock);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -223,8 +221,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_lk_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -242,6 +239,9 @@ server_inodelk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         conn = SERVER_CONNECTION(frame);
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 if ((op_errno != ENOSYS) && (op_errno != EAGAIN)) {
@@ -264,9 +264,6 @@ server_inodelk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                                &frame->root->lk_owner,
                                GF_FOP_INODELK);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -274,8 +271,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -293,6 +289,9 @@ server_finodelk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         conn = SERVER_CONNECTION(frame);
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 if ((op_errno != ENOSYS) && (op_errno != EAGAIN)) {
@@ -315,9 +314,6 @@ server_finodelk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                                frame->root->pid,
                                &frame->root->lk_owner, GF_FOP_INODELK);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -325,8 +321,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -343,6 +338,9 @@ server_entrylk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         conn = SERVER_CONNECTION(frame);
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 if ((op_errno != ENOSYS) && (op_errno != EAGAIN)) {
@@ -365,9 +363,6 @@ server_entrylk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                                &frame->root->lk_owner,
                                GF_FOP_ENTRYLK);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -375,8 +370,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -394,6 +388,9 @@ server_fentrylk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req   = frame->local;
         conn  = SERVER_CONNECTION(frame);
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 if ((op_errno != ENOSYS) && (op_errno != EAGAIN)) {
@@ -415,9 +412,6 @@ server_fentrylk_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                                NULL, state->fd, frame->root->pid,
                                &frame->root->lk_owner, GF_FOP_ENTRYLK);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -425,8 +419,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -443,6 +436,9 @@ server_access_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": ACCESS %s (%s) ==> (%s)",
@@ -452,9 +448,6 @@ server_access_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto out;
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -462,8 +455,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -480,6 +472,9 @@ server_rmdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -505,9 +500,6 @@ server_rmdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         gf_stat_from_iatt (&rsp.preparent, preparent);
         gf_stat_from_iatt (&rsp.postparent, postparent);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -515,8 +507,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_rmdir_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -534,6 +525,9 @@ server_mkdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -553,9 +547,6 @@ server_mkdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         inode_lookup (link_inode);
         inode_unref (link_inode);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -563,8 +554,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_mkdir_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -582,6 +572,9 @@ server_mknod_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -601,9 +594,6 @@ server_mknod_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         inode_lookup (link_inode);
         inode_unref (link_inode);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -611,8 +601,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_mknod_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -628,6 +617,9 @@ server_fsyncdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FSYNCDIR %"PRId64" (%s) ==> (%s)",
@@ -637,9 +629,6 @@ server_fsyncdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto out;
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -647,8 +636,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -665,6 +653,9 @@ server_readdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -685,9 +676,6 @@ server_readdir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 }
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -695,8 +683,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_readdir_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         readdir_rsp_cleanup (&rsp);
 
@@ -717,6 +704,9 @@ server_opendir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         conn = SERVER_CONNECTION (frame);
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": OPENDIR %s (%s) ==> (%s)",
@@ -729,9 +719,6 @@ server_opendir_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         fd_no = gf_fd_unused_get (conn->fdtable, fd);
         fd_ref (fd); // on behalf of the client
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.fd = fd_no;
         rsp.op_ret    = op_ret;
@@ -740,8 +727,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_opendir_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -757,6 +743,9 @@ server_removexattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req   = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret == -1) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": REMOVEXATTR %s (%s) of key %s ==> (%s)",
@@ -766,9 +755,6 @@ server_removexattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto out;
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -776,8 +762,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -793,6 +778,9 @@ server_fremovexattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req   = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret == -1) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FREMOVEXATTR %"PRId64" (%s) (%s) ==> (%s)",
@@ -802,9 +790,6 @@ server_fremovexattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto out;
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -812,8 +797,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -830,8 +814,12 @@ server_getxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret == -1) {
-                gf_log (this->name, (((op_errno == ENOTSUP) || (op_errno == ENODATA)) ?
+                gf_log (this->name, (((op_errno == ENOTSUP) ||
+                                      (op_errno == ENODATA)) ?
                                      GF_LOG_DEBUG : GF_LOG_INFO),
                         "%"PRId64": GETXATTR %s (%s) (%s) ==> (%s)",
                         frame->root->unique, state->loc.path,
@@ -843,9 +831,6 @@ server_getxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         GF_PROTOCOL_DICT_SERIALIZE (this, dict, (&rsp.dict.dict_val),
                                     rsp.dict.dict_len, op_errno, out);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret        = op_ret;
         rsp.op_errno      = gf_errno_to_error (op_errno);
@@ -853,11 +838,9 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_getxattr_rsp);
 
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -875,6 +858,9 @@ server_fgetxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret == -1) {
                 gf_log (this->name, ((op_errno == ENOTSUP) ?
                                      GF_LOG_DEBUG : GF_LOG_INFO),
@@ -888,9 +874,6 @@ server_fgetxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         GF_PROTOCOL_DICT_SERIALIZE (this, dict, (&rsp.dict.dict_val),
                                     rsp.dict.dict_len, op_errno, out);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
 
         rsp.op_ret        = op_ret;
@@ -899,11 +882,9 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_fgetxattr_rsp);
 
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -919,6 +900,9 @@ server_setxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret == -1) {
                 gf_log (this->name, ((op_errno == ENOTSUP) ?
                                      GF_LOG_DEBUG : GF_LOG_INFO),
@@ -932,9 +916,6 @@ server_setxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto out;
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -942,8 +923,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -960,6 +940,9 @@ server_fsetxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret == -1) {
                 gf_log (this->name, ((op_errno == ENOTSUP) ?
                                      GF_LOG_DEBUG : GF_LOG_INFO),
@@ -973,9 +956,6 @@ server_fsetxattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto out;
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -983,8 +963,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1006,6 +985,9 @@ server_rename_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req   = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret == -1) {
                 uuid_utoa_r (state->resolve.gfid, oldpar_str);
@@ -1059,9 +1041,6 @@ server_rename_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         gf_stat_from_iatt (&rsp.prenewparent, prenewparent);
         gf_stat_from_iatt (&rsp.postnewparent, postnewparent);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1069,8 +1048,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_rename_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1087,6 +1065,9 @@ server_unlink_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -1114,9 +1095,6 @@ server_unlink_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         gf_stat_from_iatt (&rsp.preparent, preparent);
         gf_stat_from_iatt (&rsp.postparent, postparent);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1124,8 +1102,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_unlink_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1143,6 +1120,9 @@ server_symlink_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -1162,9 +1142,6 @@ server_symlink_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         inode_lookup (link_inode);
         inode_unref (link_inode);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1172,8 +1149,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_symlink_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1195,6 +1171,9 @@ server_link_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 uuid_utoa_r (state->resolve.gfid, gfid_str);
                 uuid_utoa_r (state->resolve2.pargfid, newpar_str);
@@ -1214,9 +1193,6 @@ server_link_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                                  state->loc2.name, stbuf);
         inode_unref (link_inode);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1224,8 +1200,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_link_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1242,6 +1217,9 @@ server_truncate_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": TRUNCATE %s (%s) ==> (%s)",
@@ -1252,8 +1230,6 @@ server_truncate_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_stat_from_iatt (&rsp.prestat, prebuf);
         gf_stat_from_iatt (&rsp.poststat, postbuf);
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
 
 out:
         rsp.op_ret    = op_ret;
@@ -1262,8 +1238,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_truncate_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1280,6 +1255,9 @@ server_fstat_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FSTAT %"PRId64" (%s) ==> (%s)",
@@ -1289,8 +1267,6 @@ server_fstat_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         }
 
         gf_stat_from_iatt (&rsp.stat, stbuf);
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
 
 out:
         rsp.op_ret    = op_ret;
@@ -1299,8 +1275,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_fstat_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1317,6 +1292,9 @@ server_ftruncate_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FTRUNCATE %"PRId64" (%s)==> (%s)",
@@ -1327,8 +1305,6 @@ server_ftruncate_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_stat_from_iatt (&rsp.prestat, prebuf);
         gf_stat_from_iatt (&rsp.poststat, postbuf);
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
 
 out:
         rsp.op_ret    = op_ret;
@@ -1337,8 +1313,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_ftruncate_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1354,6 +1329,9 @@ server_flush_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FLUSH %"PRId64" (%s) ==>  (%s)",
@@ -1362,9 +1340,6 @@ server_flush_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
                 goto out;
         }
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1372,8 +1347,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_common_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1390,6 +1364,9 @@ server_fsync_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FSYNC %"PRId64" (%s) ==> (%s)",
@@ -1400,8 +1377,6 @@ server_fsync_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_stat_from_iatt (&(rsp.prestat), prebuf);
         gf_stat_from_iatt (&(rsp.poststat), postbuf);
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
 
 out:
         rsp.op_ret    = op_ret;
@@ -1410,8 +1385,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_fsync_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1428,6 +1402,9 @@ server_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": WRITEV %"PRId64" (%s) ==> (%s)",
@@ -1438,8 +1415,6 @@ server_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_stat_from_iatt (&rsp.prestat, prebuf);
         gf_stat_from_iatt (&rsp.poststat, postbuf);
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
 
 out:
         rsp.op_ret    = op_ret;
@@ -1448,8 +1423,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_write_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1468,17 +1442,6 @@ server_readv_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
-        if (op_ret < 0) {
-                gf_log (this->name, GF_LOG_INFO,
-                        "%"PRId64": READV %"PRId64" (%s) ==> (%s)",
-                        frame->root->unique, state->resolve.fd_no,
-                        uuid_utoa (state->resolve.gfid), strerror (op_errno));
-                goto out;
-        }
-
-        gf_stat_from_iatt (&rsp.stat, stbuf);
-        rsp.size = op_ret;
-
 #ifdef GF_TESTING_IO_XDATA
         {
                 int ret = 0;
@@ -1492,6 +1455,17 @@ server_readv_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
                                     rsp.xdata.xdata_len, op_errno, out);
 
+        if (op_ret < 0) {
+                gf_log (this->name, GF_LOG_INFO,
+                        "%"PRId64": READV %"PRId64" (%s) ==> (%s)",
+                        frame->root->unique, state->resolve.fd_no,
+                        uuid_utoa (state->resolve.gfid), strerror (op_errno));
+                goto out;
+        }
+
+        gf_stat_from_iatt (&rsp.stat, stbuf);
+        rsp.size = op_ret;
+
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1499,8 +1473,7 @@ out:
         server_submit_reply (frame, req, &rsp, vector, count, iobref,
                              (xdrproc_t)xdr_gfs3_read_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1518,6 +1491,9 @@ server_rchecksum_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": RCHECKSUM %"PRId64" (%s)==> (%s)",
@@ -1531,9 +1507,6 @@ server_rchecksum_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         rsp.strong_checksum.strong_checksum_val = (char *)strong_checksum;
         rsp.strong_checksum.strong_checksum_len = MD5_DIGEST_LENGTH;
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1541,8 +1514,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_rchecksum_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1562,6 +1534,9 @@ server_open_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         conn = SERVER_CONNECTION (frame);
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": OPEN %s (%s) ==> (%s)",
@@ -1576,17 +1551,13 @@ server_open_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         fd_ref (fd);
         rsp.fd = fd_no;
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
 
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_open_rsp);
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1608,6 +1579,9 @@ server_create_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         conn = SERVER_CONNECTION (frame);
         state = CALL_STATE (frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -1660,9 +1634,6 @@ server_create_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         gf_stat_from_iatt (&rsp.preparent, preparent);
         gf_stat_from_iatt (&rsp.postparent, postparent);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.fd        = fd_no;
         rsp.op_ret    = op_ret;
@@ -1671,8 +1642,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_create_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1689,6 +1659,9 @@ server_readlink_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": READLINK %s (%s) ==> (%s)",
@@ -1701,9 +1674,6 @@ server_readlink_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         gf_stat_from_iatt (&rsp.buf, stbuf);
         rsp.path = (char *)buf;
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1714,8 +1684,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_readlink_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1732,6 +1701,9 @@ server_stat_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state  = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": STAT %s (%s) ==> (%s)",
@@ -1742,8 +1714,6 @@ server_stat_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         }
 
         gf_stat_from_iatt (&rsp.stat, stbuf);
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
 
 out:
         rsp.op_ret    = op_ret;
@@ -1752,8 +1722,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_stat_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1771,6 +1740,9 @@ server_setattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": SETATTR %s (%s) ==> (%s)",
@@ -1782,8 +1754,6 @@ server_setattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         gf_stat_from_iatt (&rsp.statpre, statpre);
         gf_stat_from_iatt (&rsp.statpost, statpost);
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
 
 out:
         rsp.op_ret    = op_ret;
@@ -1792,8 +1762,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_setattr_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1810,6 +1779,9 @@ server_fsetattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state  = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FSETATTR %"PRId64" (%s) ==> (%s)",
@@ -1822,9 +1794,6 @@ server_fsetattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         gf_stat_from_iatt (&rsp.statpre, statpre);
         gf_stat_from_iatt (&rsp.statpost, statpost);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1832,8 +1801,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_fsetattr_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1851,6 +1819,9 @@ server_xattrop_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE (frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": XATTROP %s (%s) ==> (%s)",
@@ -1863,9 +1834,6 @@ server_xattrop_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         GF_PROTOCOL_DICT_SERIALIZE (this, dict, (&rsp.dict.dict_val),
                                     rsp.dict.dict_len, op_errno, out);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret        = op_ret;
         rsp.op_errno      = gf_errno_to_error (op_errno);
@@ -1873,11 +1841,9 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_xattrop_rsp);
 
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1895,6 +1861,9 @@ server_fxattrop_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         req = frame->local;
         state = CALL_STATE(frame);
 
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
+
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
                         "%"PRId64": FXATTROP %"PRId64" (%s) ==> (%s)",
@@ -1907,10 +1876,6 @@ server_fxattrop_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         GF_PROTOCOL_DICT_SERIALIZE (this, dict, (&rsp.dict.dict_val),
                                     rsp.dict.dict_len, op_errno, out);
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
-
 out:
         rsp.op_ret        = op_ret;
         rsp.op_errno      = gf_errno_to_error (op_errno);
@@ -1918,11 +1883,9 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_fxattrop_rsp);
 
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         return 0;
 }
@@ -1939,6 +1902,9 @@ server_readdirp_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
 
         req = frame->local;
         state = CALL_STATE(frame);
+
+        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
+                                    rsp.xdata.xdata_len, op_errno, out);
 
         if (op_ret < 0) {
                 gf_log (this->name, GF_LOG_INFO,
@@ -1962,9 +1928,6 @@ server_readdirp_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         /* TODO: need more clear thoughts before calling this function. */
         /* gf_link_inodes_from_dirent (this, state->fd->inode, entries); */
 
-        GF_PROTOCOL_DICT_SERIALIZE (this, xdata, (&rsp.xdata.xdata_val),
-                                    rsp.xdata.xdata_len, op_errno, out);
-
 out:
         rsp.op_ret    = op_ret;
         rsp.op_errno  = gf_errno_to_error (op_errno);
@@ -1972,8 +1935,7 @@ out:
         server_submit_reply (frame, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gfs3_readdirp_rsp);
 
-        if (rsp.xdata.xdata_val)
-                GF_FREE (rsp.xdata.xdata_val);
+        GF_FREE (rsp.xdata.xdata_val);
 
         readdirp_rsp_cleanup (&rsp);
 
@@ -2931,7 +2893,7 @@ err:
 /* Fop section */
 
 int
-server_stat (rpcsvc_request_t *req)
+server3_3_stat (rpcsvc_request_t *req)
 {
         server_state_t *state    = NULL;
         call_frame_t   *frame    = NULL;
@@ -2978,8 +2940,7 @@ server_stat (rpcsvc_request_t *req)
         resolve_and_resume (frame, server_stat_resume);
 
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -2989,7 +2950,7 @@ out:
 
 
 int
-server_setattr (rpcsvc_request_t *req)
+server3_3_setattr (rpcsvc_request_t *req)
 {
         server_state_t   *state                 = NULL;
         call_frame_t     *frame                 = NULL;
@@ -3039,15 +3000,14 @@ out:
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
 
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         return ret;
 }
 
 
 int
-server_fsetattr (rpcsvc_request_t *req)
+server3_3_fsetattr (rpcsvc_request_t *req)
 {
         server_state_t    *state = NULL;
         call_frame_t      *frame = NULL;
@@ -3094,8 +3054,7 @@ server_fsetattr (rpcsvc_request_t *req)
         resolve_and_resume (frame, server_fsetattr_resume);
 
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3105,7 +3064,7 @@ out:
 
 
 int
-server_readlink (rpcsvc_request_t *req)
+server3_3_readlink (rpcsvc_request_t *req)
 {
         server_state_t    *state                 = NULL;
         call_frame_t      *frame                 = NULL;
@@ -3151,8 +3110,7 @@ server_readlink (rpcsvc_request_t *req)
         resolve_and_resume (frame, server_readlink_resume);
 
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3162,7 +3120,7 @@ out:
 
 
 int
-server_create (rpcsvc_request_t *req)
+server3_3_create (rpcsvc_request_t *req)
 {
         server_state_t  *state    = NULL;
         call_frame_t    *frame    = NULL;
@@ -3220,8 +3178,7 @@ server_create (rpcsvc_request_t *req)
 
 out:
         /* memory allocated by libc, don't use GF_FREE */
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3231,7 +3188,7 @@ out:
 
 
 int
-server_open (rpcsvc_request_t *req)
+server3_3_open (rpcsvc_request_t *req)
 {
         server_state_t *state                 = NULL;
         call_frame_t   *frame                 = NULL;
@@ -3279,15 +3236,14 @@ out:
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
 
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         return ret;
 }
 
 
 int
-server_readv (rpcsvc_request_t *req)
+server3_3_readv (rpcsvc_request_t *req)
 {
         server_state_t *state = NULL;
         call_frame_t   *frame = NULL;
@@ -3336,8 +3292,7 @@ server_readv (rpcsvc_request_t *req)
         resolve_and_resume (frame, server_readv_resume);
 out:
         /* memory allocated by libc, don't use GF_FREE */
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3347,7 +3302,7 @@ out:
 
 
 int
-server_writev (rpcsvc_request_t *req)
+server3_3_writev (rpcsvc_request_t *req)
 {
         server_state_t      *state  = NULL;
         call_frame_t        *frame  = NULL;
@@ -3418,8 +3373,7 @@ server_writev (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_writev_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3429,18 +3383,18 @@ out:
 
 
 int
-server_writev_vec (rpcsvc_request_t *req, struct iovec *payload,
+server3_3_writev_vec (rpcsvc_request_t *req, struct iovec *payload,
                    int payload_count, struct iobref *iobref)
 {
-        return server_writev (req);
+        return server3_3_writev (req);
 }
 
-#define SERVER3_1_VECWRITE_START 0
-#define SERVER3_1_VECWRITE_READING_HDR 1
-#define SERVER3_1_VECWRITE_READING_OPAQUE 2
+#define SERVER3_3_VECWRITE_START 0
+#define SERVER3_3_VECWRITE_READING_HDR 1
+#define SERVER3_3_VECWRITE_READING_OPAQUE 2
 
 int
-server_writev_vecsizer (int state, ssize_t *readsize, char *base_addr,
+server3_3_writev_vecsizer (int state, ssize_t *readsize, char *base_addr,
                         char *curr_addr)
 {
         ssize_t         size = 0;
@@ -3449,13 +3403,13 @@ server_writev_vecsizer (int state, ssize_t *readsize, char *base_addr,
         XDR             xdr;
 
         switch (state) {
-        case SERVER3_1_VECWRITE_START:
+        case SERVER3_3_VECWRITE_START:
                 size = xdr_sizeof ((xdrproc_t) xdr_gfs3_write_req,
                                    &write_req);
                 *readsize = size;
-                nextstate = SERVER3_1_VECWRITE_READING_HDR;
+                nextstate = SERVER3_3_VECWRITE_READING_HDR;
                 break;
-        case SERVER3_1_VECWRITE_READING_HDR:
+        case SERVER3_3_VECWRITE_READING_HDR:
                 size = xdr_sizeof ((xdrproc_t) xdr_gfs3_write_req,
                                            &write_req);
 
@@ -3472,18 +3426,17 @@ server_writev_vecsizer (int state, ssize_t *readsize, char *base_addr,
                 *readsize = size;
 
                 if (!size)
-                        nextstate = SERVER3_1_VECWRITE_START;
+                        nextstate = SERVER3_3_VECWRITE_START;
                 else
-                        nextstate = SERVER3_1_VECWRITE_READING_OPAQUE;
+                        nextstate = SERVER3_3_VECWRITE_READING_OPAQUE;
 
-                if (write_req.xdata.xdata_val)
-                        free (write_req.xdata.xdata_val);
+                free (write_req.xdata.xdata_val);
 
                 break;
 
-        case SERVER3_1_VECWRITE_READING_OPAQUE:
+        case SERVER3_3_VECWRITE_READING_OPAQUE:
                 *readsize = 0;
-                nextstate = SERVER3_1_VECWRITE_START;
+                nextstate = SERVER3_3_VECWRITE_START;
                 break;
         default:
                 gf_log ("server", GF_LOG_ERROR, "wrong state: %d", state);
@@ -3494,7 +3447,7 @@ server_writev_vecsizer (int state, ssize_t *readsize, char *base_addr,
 
 
 int
-server_release (rpcsvc_request_t *req)
+server3_3_release (rpcsvc_request_t *req)
 {
         server_connection_t *conn = NULL;
         gfs3_release_req     args = {{0,},};
@@ -3509,7 +3462,8 @@ server_release (rpcsvc_request_t *req)
 
         conn = req->trans->xl_private;
         if (!conn) {
-                req->rpc_err = GARBAGE_ARGS;
+                /* Handshake is not complete yet. */
+                req->rpc_err = SYSTEM_ERR;
                 goto out;
         }
         gf_fd_put (conn->fdtable, args.fd);
@@ -3523,7 +3477,7 @@ out:
 }
 
 int
-server_releasedir (rpcsvc_request_t *req)
+server3_3_releasedir (rpcsvc_request_t *req)
 {
         server_connection_t *conn = NULL;
         gfs3_releasedir_req  args = {{0,},};
@@ -3554,7 +3508,7 @@ out:
 
 
 int
-server_fsync (rpcsvc_request_t *req)
+server3_3_fsync (rpcsvc_request_t *req)
 {
         server_state_t *state = NULL;
         call_frame_t   *frame = NULL;
@@ -3599,8 +3553,7 @@ server_fsync (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_fsync_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3611,7 +3564,7 @@ out:
 
 
 int
-server_flush (rpcsvc_request_t *req)
+server3_3_flush (rpcsvc_request_t *req)
 {
         server_state_t *state = NULL;
         call_frame_t   *frame = NULL;
@@ -3655,8 +3608,7 @@ server_flush (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_flush_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3667,7 +3619,7 @@ out:
 
 
 int
-server_ftruncate (rpcsvc_request_t *req)
+server3_3_ftruncate (rpcsvc_request_t *req)
 {
         server_state_t     *state = NULL;
         call_frame_t       *frame = NULL;
@@ -3712,8 +3664,7 @@ server_ftruncate (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_ftruncate_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3723,7 +3674,7 @@ out:
 
 
 int
-server_fstat (rpcsvc_request_t *req)
+server3_3_fstat (rpcsvc_request_t *req)
 {
         server_state_t *state = NULL;
         call_frame_t   *frame = NULL;
@@ -3767,8 +3718,7 @@ server_fstat (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_fstat_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3778,7 +3728,7 @@ out:
 
 
 int
-server_truncate (rpcsvc_request_t *req)
+server3_3_truncate (rpcsvc_request_t *req)
 {
         server_state_t    *state                 = NULL;
         call_frame_t      *frame                 = NULL;
@@ -3822,8 +3772,7 @@ server_truncate (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_truncate_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3834,7 +3783,7 @@ out:
 
 
 int
-server_unlink (rpcsvc_request_t *req)
+server3_3_unlink (rpcsvc_request_t *req)
 {
         server_state_t  *state                  = NULL;
         call_frame_t    *frame                  = NULL;
@@ -3882,8 +3831,7 @@ server_unlink (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_unlink_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3893,7 +3841,7 @@ out:
 
 
 int
-server_setxattr (rpcsvc_request_t *req)
+server3_3_setxattr (rpcsvc_request_t *req)
 {
         server_state_t      *state                 = NULL;
         dict_t              *dict                  = NULL;
@@ -3952,8 +3900,7 @@ server_setxattr (rpcsvc_request_t *req)
 
         return ret;
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -3967,7 +3914,7 @@ out:
 
 
 int
-server_fsetxattr (rpcsvc_request_t *req)
+server3_3_fsetxattr (rpcsvc_request_t *req)
 {
         server_state_t      *state                = NULL;
         dict_t              *dict                 = NULL;
@@ -4023,8 +3970,7 @@ server_fsetxattr (rpcsvc_request_t *req)
 
         return ret;
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4038,7 +3984,7 @@ out:
 
 
 int
-server_fxattrop (rpcsvc_request_t *req)
+server3_3_fxattrop (rpcsvc_request_t *req)
 {
         dict_t              *dict                 = NULL;
         server_state_t      *state                = NULL;
@@ -4095,8 +4041,7 @@ server_fxattrop (rpcsvc_request_t *req)
         return ret;
 
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4110,7 +4055,7 @@ out:
 
 
 int
-server_xattrop (rpcsvc_request_t *req)
+server3_3_xattrop (rpcsvc_request_t *req)
 {
         dict_t              *dict                  = NULL;
         server_state_t      *state                 = NULL;
@@ -4166,8 +4111,7 @@ server_xattrop (rpcsvc_request_t *req)
 
         return ret;
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4180,7 +4124,7 @@ out:
 
 
 int
-server_getxattr (rpcsvc_request_t *req)
+server3_3_getxattr (rpcsvc_request_t *req)
 {
         server_state_t      *state                 = NULL;
         call_frame_t        *frame                 = NULL;
@@ -4231,8 +4175,7 @@ server_getxattr (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_getxattr_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4242,7 +4185,7 @@ out:
 
 
 int
-server_fgetxattr (rpcsvc_request_t *req)
+server3_3_fgetxattr (rpcsvc_request_t *req)
 {
         server_state_t      *state      = NULL;
         call_frame_t        *frame      = NULL;
@@ -4290,8 +4233,7 @@ server_fgetxattr (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_fgetxattr_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4302,7 +4244,7 @@ out:
 
 
 int
-server_removexattr (rpcsvc_request_t *req)
+server3_3_removexattr (rpcsvc_request_t *req)
 {
         server_state_t       *state                 = NULL;
         call_frame_t         *frame                 = NULL;
@@ -4348,8 +4290,7 @@ server_removexattr (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_removexattr_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4358,7 +4299,7 @@ out:
 }
 
 int
-server_fremovexattr (rpcsvc_request_t *req)
+server3_3_fremovexattr (rpcsvc_request_t *req)
 {
         server_state_t       *state                 = NULL;
         call_frame_t         *frame                 = NULL;
@@ -4406,8 +4347,7 @@ server_fremovexattr (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_fremovexattr_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4419,7 +4359,7 @@ out:
 
 
 int
-server_opendir (rpcsvc_request_t *req)
+server3_3_opendir (rpcsvc_request_t *req)
 {
         server_state_t   *state                 = NULL;
         call_frame_t     *frame                 = NULL;
@@ -4462,8 +4402,7 @@ server_opendir (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_opendir_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4473,7 +4412,7 @@ out:
 
 
 int
-server_readdirp (rpcsvc_request_t *req)
+server3_3_readdirp (rpcsvc_request_t *req)
 {
         server_state_t      *state        = NULL;
         call_frame_t        *frame        = NULL;
@@ -4535,14 +4474,13 @@ out:
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
 
-        if (args.dict.dict_val)
-                free (args.dict.dict_val);
+        free (args.dict.dict_val);
 
         return ret;
 }
 
 int
-server_readdir (rpcsvc_request_t *req)
+server3_3_readdir (rpcsvc_request_t *req)
 {
         server_state_t      *state        = NULL;
         call_frame_t        *frame        = NULL;
@@ -4599,8 +4537,7 @@ server_readdir (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_readdir_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4609,7 +4546,7 @@ out:
 }
 
 int
-server_fsyncdir (rpcsvc_request_t *req)
+server3_3_fsyncdir (rpcsvc_request_t *req)
 {
         server_state_t      *state = NULL;
         call_frame_t        *frame = NULL;
@@ -4654,8 +4591,7 @@ server_fsyncdir (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_fsyncdir_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4666,7 +4602,7 @@ out:
 
 
 int
-server_mknod (rpcsvc_request_t *req)
+server3_3_mknod (rpcsvc_request_t *req)
 {
         server_state_t      *state                  = NULL;
         call_frame_t        *frame                  = NULL;
@@ -4721,8 +4657,7 @@ out:
                 req->rpc_err = GARBAGE_ARGS;
 
         /* memory allocated by libc, don't use GF_FREE */
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         return ret;
 
@@ -4730,7 +4665,7 @@ out:
 
 
 int
-server_mkdir (rpcsvc_request_t *req)
+server3_3_mkdir (rpcsvc_request_t *req)
 {
         server_state_t      *state                  = NULL;
         call_frame_t        *frame                  = NULL;
@@ -4784,15 +4719,14 @@ out:
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
 
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         return ret;
 }
 
 
 int
-server_rmdir (rpcsvc_request_t *req)
+server3_3_rmdir (rpcsvc_request_t *req)
 {
         server_state_t      *state                  = NULL;
         call_frame_t        *frame                  = NULL;
@@ -4840,8 +4774,7 @@ server_rmdir (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_rmdir_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4852,7 +4785,7 @@ out:
 
 
 int
-server_inodelk (rpcsvc_request_t *req)
+server3_3_inodelk (rpcsvc_request_t *req)
 {
         server_state_t      *state                 = NULL;
         call_frame_t        *frame                 = NULL;
@@ -4928,11 +4861,9 @@ server_inodelk (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_inodelk_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
-        if (args.flock.lk_owner.lk_owner_val)
-                free (args.flock.lk_owner.lk_owner_val);
+        free (args.flock.lk_owner.lk_owner_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -4941,7 +4872,7 @@ out:
 }
 
 int
-server_finodelk (rpcsvc_request_t *req)
+server3_3_finodelk (rpcsvc_request_t *req)
 {
         server_state_t      *state        = NULL;
         call_frame_t        *frame        = NULL;
@@ -5016,11 +4947,9 @@ server_finodelk (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_finodelk_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
-        if (args.flock.lk_owner.lk_owner_val)
-                free (args.flock.lk_owner.lk_owner_val);
+        free (args.flock.lk_owner.lk_owner_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5030,7 +4959,7 @@ out:
 
 
 int
-server_entrylk (rpcsvc_request_t *req)
+server3_3_entrylk (rpcsvc_request_t *req)
 {
         server_state_t      *state                 = NULL;
         call_frame_t        *frame                 = NULL;
@@ -5083,8 +5012,7 @@ server_entrylk (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_entrylk_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5093,7 +5021,7 @@ out:
 }
 
 int
-server_fentrylk (rpcsvc_request_t *req)
+server3_3_fentrylk (rpcsvc_request_t *req)
 {
         server_state_t      *state        = NULL;
         call_frame_t        *frame        = NULL;
@@ -5146,8 +5074,7 @@ server_fentrylk (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_fentrylk_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5156,7 +5083,7 @@ out:
 }
 
 int
-server_access (rpcsvc_request_t *req)
+server3_3_access (rpcsvc_request_t *req)
 {
         server_state_t      *state                 = NULL;
         call_frame_t        *frame                 = NULL;
@@ -5200,8 +5127,7 @@ server_access (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_access_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5212,7 +5138,7 @@ out:
 
 
 int
-server_symlink (rpcsvc_request_t *req)
+server3_3_symlink (rpcsvc_request_t *req)
 {
         server_state_t      *state                 = NULL;
         call_frame_t        *frame                 = NULL;
@@ -5266,8 +5192,7 @@ out:
                 req->rpc_err = GARBAGE_ARGS;
 
         /* memory allocated by libc, don't use GF_FREE */
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         return ret;
 }
@@ -5275,7 +5200,7 @@ out:
 
 
 int
-server_link (rpcsvc_request_t *req)
+server3_3_link (rpcsvc_request_t *req)
 {
         server_state_t      *state                     = NULL;
         call_frame_t        *frame                     = NULL;
@@ -5324,8 +5249,7 @@ server_link (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_link_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5335,7 +5259,7 @@ out:
 
 
 int
-server_rename (rpcsvc_request_t *req)
+server3_3_rename (rpcsvc_request_t *req)
 {
         server_state_t      *state                     = NULL;
         call_frame_t        *frame                     = NULL;
@@ -5386,8 +5310,7 @@ server_rename (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_rename_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5396,7 +5319,7 @@ out:
 }
 
 int
-server_lk (rpcsvc_request_t *req)
+server3_3_lk (rpcsvc_request_t *req)
 {
         server_state_t      *state = NULL;
         call_frame_t        *frame = NULL;
@@ -5488,11 +5411,9 @@ server_lk (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_lk_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
-        if (args.flock.lk_owner.lk_owner_val)
-                free (args.flock.lk_owner.lk_owner_val);
+        free (args.flock.lk_owner.lk_owner_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5502,7 +5423,7 @@ out:
 
 
 int
-server_rchecksum (rpcsvc_request_t *req)
+server3_3_rchecksum (rpcsvc_request_t *req)
 {
         server_state_t      *state = NULL;
         call_frame_t        *frame = NULL;
@@ -5547,8 +5468,7 @@ server_rchecksum (rpcsvc_request_t *req)
         ret = 0;
         resolve_and_resume (frame, server_rchecksum_resume);
 out:
-        if (args.xdata.xdata_val)
-                free (args.xdata.xdata_val);
+        free (args.xdata.xdata_val);
 
         if (op_errno)
                 req->rpc_err = GARBAGE_ARGS;
@@ -5571,7 +5491,7 @@ server_null (rpcsvc_request_t *req)
 }
 
 int
-server_lookup (rpcsvc_request_t *req)
+server3_3_lookup (rpcsvc_request_t *req)
 {
         call_frame_t        *frame    = NULL;
         server_state_t      *state    = NULL;
@@ -5637,7 +5557,7 @@ err:
 }
 
 int
-server_statfs (rpcsvc_request_t *req)
+server3_3_statfs (rpcsvc_request_t *req)
 {
         server_state_t      *state = NULL;
         call_frame_t        *frame = NULL;
@@ -5687,58 +5607,58 @@ out:
 }
 
 
-rpcsvc_actor_t glusterfs3_1_fop_actors[] = {
+rpcsvc_actor_t glusterfs3_3_fop_actors[] = {
         [GFS3_OP_NULL]        = { "NULL",       GFS3_OP_NULL, server_null, NULL, NULL, 0},
-        [GFS3_OP_STAT]        = { "STAT",       GFS3_OP_STAT, server_stat, NULL, NULL, 0},
-        [GFS3_OP_READLINK]    = { "READLINK",   GFS3_OP_READLINK, server_readlink, NULL, NULL, 0},
-        [GFS3_OP_MKNOD]       = { "MKNOD",      GFS3_OP_MKNOD, server_mknod, NULL, NULL, 0},
-        [GFS3_OP_MKDIR]       = { "MKDIR",      GFS3_OP_MKDIR, server_mkdir, NULL, NULL, 0},
-        [GFS3_OP_UNLINK]      = { "UNLINK",     GFS3_OP_UNLINK, server_unlink, NULL, NULL, 0},
-        [GFS3_OP_RMDIR]       = { "RMDIR",      GFS3_OP_RMDIR, server_rmdir, NULL, NULL, 0},
-        [GFS3_OP_SYMLINK]     = { "SYMLINK",    GFS3_OP_SYMLINK, server_symlink, NULL, NULL, 0},
-        [GFS3_OP_RENAME]      = { "RENAME",     GFS3_OP_RENAME, server_rename, NULL, NULL, 0},
-        [GFS3_OP_LINK]        = { "LINK",       GFS3_OP_LINK, server_link, NULL, NULL, 0},
-        [GFS3_OP_TRUNCATE]    = { "TRUNCATE",   GFS3_OP_TRUNCATE, server_truncate, NULL, NULL, 0},
-        [GFS3_OP_OPEN]        = { "OPEN",       GFS3_OP_OPEN, server_open, NULL, NULL, 0},
-        [GFS3_OP_READ]        = { "READ",       GFS3_OP_READ, server_readv, NULL, NULL, 0},
-        [GFS3_OP_WRITE]       = { "WRITE",      GFS3_OP_WRITE, server_writev, server_writev_vec, server_writev_vecsizer, 0},
-        [GFS3_OP_STATFS]      = { "STATFS",     GFS3_OP_STATFS, server_statfs, NULL, NULL, 0},
-        [GFS3_OP_FLUSH]       = { "FLUSH",      GFS3_OP_FLUSH, server_flush, NULL, NULL, 0},
-        [GFS3_OP_FSYNC]       = { "FSYNC",      GFS3_OP_FSYNC, server_fsync, NULL, NULL, 0},
-        [GFS3_OP_SETXATTR]    = { "SETXATTR",   GFS3_OP_SETXATTR, server_setxattr, NULL, NULL, 0},
-        [GFS3_OP_GETXATTR]    = { "GETXATTR",   GFS3_OP_GETXATTR, server_getxattr, NULL, NULL, 0},
-        [GFS3_OP_REMOVEXATTR] = { "REMOVEXATTR", GFS3_OP_REMOVEXATTR, server_removexattr, NULL, NULL, 0},
-        [GFS3_OP_OPENDIR]     = { "OPENDIR",    GFS3_OP_OPENDIR, server_opendir, NULL, NULL, 0},
-        [GFS3_OP_FSYNCDIR]    = { "FSYNCDIR",   GFS3_OP_FSYNCDIR, server_fsyncdir, NULL, NULL, 0},
-        [GFS3_OP_ACCESS]      = { "ACCESS",     GFS3_OP_ACCESS, server_access, NULL, NULL, 0},
-        [GFS3_OP_CREATE]      = { "CREATE",     GFS3_OP_CREATE, server_create, NULL, NULL, 0},
-        [GFS3_OP_FTRUNCATE]   = { "FTRUNCATE",  GFS3_OP_FTRUNCATE, server_ftruncate, NULL, NULL, 0},
-        [GFS3_OP_FSTAT]       = { "FSTAT",      GFS3_OP_FSTAT, server_fstat, NULL, NULL, 0},
-        [GFS3_OP_LK]          = { "LK",         GFS3_OP_LK, server_lk, NULL, NULL, 0},
-        [GFS3_OP_LOOKUP]      = { "LOOKUP",     GFS3_OP_LOOKUP, server_lookup, NULL, NULL, 0},
-        [GFS3_OP_READDIR]     = { "READDIR",    GFS3_OP_READDIR, server_readdir, NULL, NULL, 0},
-        [GFS3_OP_INODELK]     = { "INODELK",    GFS3_OP_INODELK, server_inodelk, NULL, NULL, 0},
-        [GFS3_OP_FINODELK]    = { "FINODELK",   GFS3_OP_FINODELK, server_finodelk, NULL, NULL, 0},
-        [GFS3_OP_ENTRYLK]     = { "ENTRYLK",    GFS3_OP_ENTRYLK, server_entrylk, NULL, NULL, 0},
-        [GFS3_OP_FENTRYLK]    = { "FENTRYLK",   GFS3_OP_FENTRYLK, server_fentrylk, NULL, NULL, 0},
-        [GFS3_OP_XATTROP]     = { "XATTROP",    GFS3_OP_XATTROP, server_xattrop, NULL, NULL, 0},
-        [GFS3_OP_FXATTROP]    = { "FXATTROP",   GFS3_OP_FXATTROP, server_fxattrop, NULL, NULL, 0},
-        [GFS3_OP_FGETXATTR]   = { "FGETXATTR",  GFS3_OP_FGETXATTR, server_fgetxattr, NULL, NULL, 0},
-        [GFS3_OP_FSETXATTR]   = { "FSETXATTR",  GFS3_OP_FSETXATTR, server_fsetxattr, NULL, NULL, 0},
-        [GFS3_OP_RCHECKSUM]   = { "RCHECKSUM",  GFS3_OP_RCHECKSUM, server_rchecksum, NULL, NULL, 0},
-        [GFS3_OP_SETATTR]     = { "SETATTR",    GFS3_OP_SETATTR, server_setattr, NULL, NULL, 0},
-        [GFS3_OP_FSETATTR]    = { "FSETATTR",   GFS3_OP_FSETATTR, server_fsetattr, NULL, NULL, 0},
-        [GFS3_OP_READDIRP]    = { "READDIRP",   GFS3_OP_READDIRP, server_readdirp, NULL, NULL, 0},
-        [GFS3_OP_RELEASE]     = { "RELEASE",    GFS3_OP_RELEASE, server_release, NULL, NULL, 0},
-        [GFS3_OP_RELEASEDIR]  = { "RELEASEDIR", GFS3_OP_RELEASEDIR, server_releasedir, NULL, NULL, 0},
-        [GFS3_OP_FREMOVEXATTR] = { "FREMOVEXATTR", GFS3_OP_FREMOVEXATTR, server_fremovexattr, NULL, NULL, 0},
+        [GFS3_OP_STAT]        = { "STAT",       GFS3_OP_STAT, server3_3_stat, NULL, NULL, 0},
+        [GFS3_OP_READLINK]    = { "READLINK",   GFS3_OP_READLINK, server3_3_readlink, NULL, NULL, 0},
+        [GFS3_OP_MKNOD]       = { "MKNOD",      GFS3_OP_MKNOD, server3_3_mknod, NULL, NULL, 0},
+        [GFS3_OP_MKDIR]       = { "MKDIR",      GFS3_OP_MKDIR, server3_3_mkdir, NULL, NULL, 0},
+        [GFS3_OP_UNLINK]      = { "UNLINK",     GFS3_OP_UNLINK, server3_3_unlink, NULL, NULL, 0},
+        [GFS3_OP_RMDIR]       = { "RMDIR",      GFS3_OP_RMDIR, server3_3_rmdir, NULL, NULL, 0},
+        [GFS3_OP_SYMLINK]     = { "SYMLINK",    GFS3_OP_SYMLINK, server3_3_symlink, NULL, NULL, 0},
+        [GFS3_OP_RENAME]      = { "RENAME",     GFS3_OP_RENAME, server3_3_rename, NULL, NULL, 0},
+        [GFS3_OP_LINK]        = { "LINK",       GFS3_OP_LINK, server3_3_link, NULL, NULL, 0},
+        [GFS3_OP_TRUNCATE]    = { "TRUNCATE",   GFS3_OP_TRUNCATE, server3_3_truncate, NULL, NULL, 0},
+        [GFS3_OP_OPEN]        = { "OPEN",       GFS3_OP_OPEN, server3_3_open, NULL, NULL, 0},
+        [GFS3_OP_READ]        = { "READ",       GFS3_OP_READ, server3_3_readv, NULL, NULL, 0},
+        [GFS3_OP_WRITE]       = { "WRITE",      GFS3_OP_WRITE, server3_3_writev, server3_3_writev_vec, server3_3_writev_vecsizer, 0},
+        [GFS3_OP_STATFS]      = { "STATFS",     GFS3_OP_STATFS, server3_3_statfs, NULL, NULL, 0},
+        [GFS3_OP_FLUSH]       = { "FLUSH",      GFS3_OP_FLUSH, server3_3_flush, NULL, NULL, 0},
+        [GFS3_OP_FSYNC]       = { "FSYNC",      GFS3_OP_FSYNC, server3_3_fsync, NULL, NULL, 0},
+        [GFS3_OP_SETXATTR]    = { "SETXATTR",   GFS3_OP_SETXATTR, server3_3_setxattr, NULL, NULL, 0},
+        [GFS3_OP_GETXATTR]    = { "GETXATTR",   GFS3_OP_GETXATTR, server3_3_getxattr, NULL, NULL, 0},
+        [GFS3_OP_REMOVEXATTR] = { "REMOVEXATTR", GFS3_OP_REMOVEXATTR, server3_3_removexattr, NULL, NULL, 0},
+        [GFS3_OP_OPENDIR]     = { "OPENDIR",    GFS3_OP_OPENDIR, server3_3_opendir, NULL, NULL, 0},
+        [GFS3_OP_FSYNCDIR]    = { "FSYNCDIR",   GFS3_OP_FSYNCDIR, server3_3_fsyncdir, NULL, NULL, 0},
+        [GFS3_OP_ACCESS]      = { "ACCESS",     GFS3_OP_ACCESS, server3_3_access, NULL, NULL, 0},
+        [GFS3_OP_CREATE]      = { "CREATE",     GFS3_OP_CREATE, server3_3_create, NULL, NULL, 0},
+        [GFS3_OP_FTRUNCATE]   = { "FTRUNCATE",  GFS3_OP_FTRUNCATE, server3_3_ftruncate, NULL, NULL, 0},
+        [GFS3_OP_FSTAT]       = { "FSTAT",      GFS3_OP_FSTAT, server3_3_fstat, NULL, NULL, 0},
+        [GFS3_OP_LK]          = { "LK",         GFS3_OP_LK, server3_3_lk, NULL, NULL, 0},
+        [GFS3_OP_LOOKUP]      = { "LOOKUP",     GFS3_OP_LOOKUP, server3_3_lookup, NULL, NULL, 0},
+        [GFS3_OP_READDIR]     = { "READDIR",    GFS3_OP_READDIR, server3_3_readdir, NULL, NULL, 0},
+        [GFS3_OP_INODELK]     = { "INODELK",    GFS3_OP_INODELK, server3_3_inodelk, NULL, NULL, 0},
+        [GFS3_OP_FINODELK]    = { "FINODELK",   GFS3_OP_FINODELK, server3_3_finodelk, NULL, NULL, 0},
+        [GFS3_OP_ENTRYLK]     = { "ENTRYLK",    GFS3_OP_ENTRYLK, server3_3_entrylk, NULL, NULL, 0},
+        [GFS3_OP_FENTRYLK]    = { "FENTRYLK",   GFS3_OP_FENTRYLK, server3_3_fentrylk, NULL, NULL, 0},
+        [GFS3_OP_XATTROP]     = { "XATTROP",    GFS3_OP_XATTROP, server3_3_xattrop, NULL, NULL, 0},
+        [GFS3_OP_FXATTROP]    = { "FXATTROP",   GFS3_OP_FXATTROP, server3_3_fxattrop, NULL, NULL, 0},
+        [GFS3_OP_FGETXATTR]   = { "FGETXATTR",  GFS3_OP_FGETXATTR, server3_3_fgetxattr, NULL, NULL, 0},
+        [GFS3_OP_FSETXATTR]   = { "FSETXATTR",  GFS3_OP_FSETXATTR, server3_3_fsetxattr, NULL, NULL, 0},
+        [GFS3_OP_RCHECKSUM]   = { "RCHECKSUM",  GFS3_OP_RCHECKSUM, server3_3_rchecksum, NULL, NULL, 0},
+        [GFS3_OP_SETATTR]     = { "SETATTR",    GFS3_OP_SETATTR, server3_3_setattr, NULL, NULL, 0},
+        [GFS3_OP_FSETATTR]    = { "FSETATTR",   GFS3_OP_FSETATTR, server3_3_fsetattr, NULL, NULL, 0},
+        [GFS3_OP_READDIRP]    = { "READDIRP",   GFS3_OP_READDIRP, server3_3_readdirp, NULL, NULL, 0},
+        [GFS3_OP_RELEASE]     = { "RELEASE",    GFS3_OP_RELEASE, server3_3_release, NULL, NULL, 0},
+        [GFS3_OP_RELEASEDIR]  = { "RELEASEDIR", GFS3_OP_RELEASEDIR, server3_3_releasedir, NULL, NULL, 0},
+        [GFS3_OP_FREMOVEXATTR] = { "FREMOVEXATTR", GFS3_OP_FREMOVEXATTR, server3_3_fremovexattr, NULL, NULL, 0},
 };
 
 
-struct rpcsvc_program glusterfs3_1_fop_prog = {
-        .progname  = "GlusterFS " PACKAGE_VERSION,
-        .prognum   = GLUSTER3_1_FOP_PROGRAM,
-        .progver   = GLUSTER3_1_FOP_VERSION,
-        .numactors = GLUSTER3_1_FOP_PROCCNT,
-        .actors    = glusterfs3_1_fop_actors,
+struct rpcsvc_program glusterfs3_3_fop_prog = {
+        .progname  = "GlusterFS 3.3",
+        .prognum   = GLUSTER_FOP_PROGRAM,
+        .progver   = GLUSTER_FOP_VERSION,
+        .numactors = GLUSTER_FOP_PROCCNT,
+        .actors    = glusterfs3_3_fop_actors,
 };

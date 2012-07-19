@@ -87,6 +87,8 @@ enum argp_option_keys {
         ARGP_USER_MAP_ROOT_KEY            = 156,
         ARGP_MEM_ACCOUNTING_KEY           = 157,
         ARGP_SELINUX_KEY                  = 158,
+	ARGP_FOPEN_KEEP_CACHE_KEY	  = 159,
+	ARGP_GID_TIMEOUT_KEY		  = 160,
 };
 
 struct _gfd_vol_top_priv_t {
@@ -107,4 +109,6 @@ void cleanup_and_exit (int signum);
 
 void *glusterfs_volume_top_read_perf (void *args);
 void *glusterfs_volume_top_write_perf (void *args);
+
+extern glusterfs_ctx_t *glusterfsd_ctx;
 #endif /* __GLUSTERFSD_H__ */

@@ -31,14 +31,11 @@
 static void
 fuse_resolve_wipe (fuse_resolve_t *resolve)
 {
-        if (resolve->path)
-                GF_FREE ((void *)resolve->path);
+        GF_FREE ((void *)resolve->path);
 
-        if (resolve->bname)
-                GF_FREE ((void *)resolve->bname);
+        GF_FREE ((void *)resolve->bname);
 
-        if (resolve->resolved)
-                GF_FREE ((void *)resolve->resolved);
+        GF_FREE ((void *)resolve->resolved);
 
         if (resolve->fd)
                 fd_unref (resolve->fd);
@@ -248,6 +245,46 @@ out:
 #endif /* GF_LINUX_HOST_OS */
 }
 
+/*
+ * Get the groups for the PID associated with this frame. If enabled,
+ * use the gid cache to reduce group list collection.
+ */
+static void get_groups(fuse_private_t *priv, call_frame_t *frame)
+{
+	int i;
+	const gid_list_t *gl;
+	gid_list_t agl;
+
+	if (!priv->gid_cache_timeout) {
+		frame_fill_groups(frame);
+		return;
+	}
+
+	gl = gid_cache_lookup(&priv->gid_cache, frame->root->pid);
+	if (gl) {
+		frame->root->ngrps = gl->gl_count;
+		for (i = 0; i < gl->gl_count; i++)
+			frame->root->groups[i] = gl->gl_list[i];
+		gid_cache_release(&priv->gid_cache, gl);
+		return;
+	}
+
+	frame_fill_groups (frame);
+
+	agl.gl_id = frame->root->pid;
+	agl.gl_count = frame->root->ngrps;
+	agl.gl_list = GF_CALLOC(frame->root->ngrps, sizeof(gid_t),
+			gf_fuse_mt_gids_t);
+	if (!agl.gl_list)
+		return;
+
+	for (i = 0; i < frame->root->ngrps; i++)
+		agl.gl_list[i] = frame->root->groups[i];
+
+	if (gid_cache_add(&priv->gid_cache, &agl) != 1)
+		GF_FREE(agl.gl_list);
+}
+
 call_frame_t *
 get_call_frame_for_req (fuse_state_t *state)
 {
@@ -275,7 +312,7 @@ get_call_frame_for_req (fuse_state_t *state)
                                           state->lk_owner);
         }
 
-        frame_fill_groups (frame);
+	get_groups(priv, frame);
 
         if (priv && priv->client_pid_set)
                 frame->root->pid = priv->client_pid;
@@ -505,6 +542,34 @@ fuse_flip_xattr_ns (fuse_private_t *priv, char *okey, char **nkey)
                 /* if we cannot match, continue with what we got */
                 ret = fuse_xattr_alloc_default (okey, nkey);
         }
+
+        return ret;
+}
+
+int
+fuse_ignore_xattr_set (fuse_private_t *priv, char *key)
+{
+        int ret = 0;
+
+        /* don't mess with user namespace */
+        if (fnmatch ("user.*", key, FNM_PERIOD) == 0)
+                goto out;
+
+        if (priv->client_pid != GF_CLIENT_PID_GSYNCD)
+                goto out;
+
+        /* trusted NS check */
+        if (!((fnmatch (PRIV_XA_NS".glusterfs.*.xtime", key, FNM_PERIOD) == 0)
+              || (fnmatch (PRIV_XA_NS".glusterfs.volume-mark",
+                           key, FNM_PERIOD) == 0)
+              || (fnmatch (PRIV_XA_NS".glusterfs.volume-mark.*",
+                           key, FNM_PERIOD) == 0)))
+                ret = -1;
+
+ out:
+        gf_log ("glusterfs-fuse", GF_LOG_DEBUG, "%s setxattr: key [%s], "
+                " client pid [%d]", (ret ? "disallowing" : "allowing"), key,
+                priv->client_pid);
 
         return ret;
 }

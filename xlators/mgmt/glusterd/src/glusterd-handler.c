@@ -144,19 +144,16 @@ out:
         if (0 != ret) {
                 if (ctx && ctx->hostname)
                         GF_FREE (ctx->hostname);
-                if (ctx)
-                        GF_FREE (ctx);
+                GF_FREE (ctx);
                 if (dict) {
                         if ((!dict->extra_stdfree) &&
                             friend_req->vols.vols_val)
                                 free (friend_req->vols.vols_val);
                         dict_unref (dict);
                 } else {
-                    if (friend_req->vols.vols_val)
-                        free (friend_req->vols.vols_val);
+                    free (friend_req->vols.vols_val);
                 }
-                if (event)
-                        GF_FREE (event);
+                GF_FREE (event);
         } else {
                 if (peerinfo && (0 == peerinfo->connected))
                         ret = GLUSTERD_CONNECTION_AWAITED;
@@ -226,8 +223,7 @@ out:
         if (0 != ret) {
                 if (ctx && ctx->hostname)
                         GF_FREE (ctx->hostname);
-                if (ctx)
-                        GF_FREE (ctx);
+                GF_FREE (ctx);
         }
 
         return ret;
@@ -567,8 +563,7 @@ out:
         if (ret) {
                 if (dict)
                         dict_unref (dict);
-                if (req_ctx)
-                        GF_FREE (req_ctx);
+                GF_FREE (req_ctx);
         }
         return ret;
 }
@@ -605,8 +600,7 @@ glusterd_handle_stage_op (rpcsvc_request_t *req)
         ret = glusterd_op_sm_inject_event (GD_OP_EVENT_STAGE_OP, req_ctx);
 
  out:
-        if (op_req.buf.buf_val)
-                free (op_req.buf.buf_val);//malloced by xdr
+        free (op_req.buf.buf_val);//malloced by xdr
         glusterd_friend_sm ();
         glusterd_op_sm ();
         return ret;
@@ -650,8 +644,7 @@ glusterd_handle_commit_op (rpcsvc_request_t *req)
         ret = glusterd_op_init_ctx (op_req.op);
 
 out:
-        if (op_req.buf.buf_val)
-                free (op_req.buf.buf_val);//malloced by xdr
+        free (op_req.buf.buf_val);//malloced by xdr
         glusterd_friend_sm ();
         glusterd_op_sm ();
         return ret;
@@ -707,8 +700,7 @@ glusterd_handle_cli_probe (rpcsvc_request_t *req)
                 ret = 0;
         }
 out:
-        if (cli_req.hostname)
-                free (cli_req.hostname);//its malloced by xdr
+        free (cli_req.hostname);//its malloced by xdr
 
         if (run_fsm) {
                 glusterd_friend_sm ();
@@ -787,8 +779,7 @@ out:
                                                       cli_req.hostname);
         }
 
-        if (cli_req.hostname)
-                free (cli_req.hostname);//malloced by xdr
+        free (cli_req.hostname);//malloced by xdr
 
         glusterd_friend_sm ();
         glusterd_op_sm ();
@@ -929,7 +920,7 @@ glusterd_handle_cli_list_volume (rpcsvc_request_t *req)
                 goto out;
 
         ret = dict_allocate_and_serialize (dict, &rsp.dict.dict_val,
-                                           (size_t *)&rsp.dict.dict_len);
+                                           &rsp.dict.dict_len);
         if (ret)
                 goto out;
 
@@ -1230,12 +1221,11 @@ glusterd_fsm_log_send_resp (rpcsvc_request_t *req, int op_ret,
         rsp.op_errstr = op_errstr;
         if (rsp.op_ret == 0)
                 ret = dict_allocate_and_serialize (dict, &rsp.fsm_log.fsm_log_val,
-                                                (size_t *)&rsp.fsm_log.fsm_log_len);
+                                                &rsp.fsm_log.fsm_log_len);
 
         ret = glusterd_submit_reply (req, &rsp, NULL, 0, NULL,
                                      (xdrproc_t)xdr_gf1_cli_fsm_log_rsp);
-        if (rsp.fsm_log.fsm_log_val)
-                GF_FREE (rsp.fsm_log.fsm_log_val);
+        GF_FREE (rsp.fsm_log.fsm_log_val);
 
         gf_log ("glusterd", GF_LOG_DEBUG, "Responded, ret: %d", ret);
 
@@ -1287,8 +1277,7 @@ glusterd_handle_fsm_log (rpcsvc_request_t *req)
         ret = glusterd_sm_tr_log_add_to_dict (dict, log);
 out:
         (void)glusterd_fsm_log_send_resp (req, ret, msg, dict);
-        if (cli_req.name)
-                free (cli_req.name);//malloced by xdr
+        free (cli_req.name);//malloced by xdr
         if (dict)
                 dict_unref (dict);
 
@@ -1402,9 +1391,8 @@ glusterd_op_stage_send_resp (rpcsvc_request_t   *req,
         else
                 rsp.op_errstr = "";
 
-        ret = dict_allocate_and_serialize (rsp_dict,
-                                           &rsp.dict.dict_val,
-                                           (size_t *)&rsp.dict.dict_len);
+        ret = dict_allocate_and_serialize (rsp_dict, &rsp.dict.dict_val,
+                                           &rsp.dict.dict_len);
         if (ret < 0) {
                 gf_log ("", GF_LOG_DEBUG,
                         "failed to get serialized length of dict");
@@ -1416,8 +1404,7 @@ glusterd_op_stage_send_resp (rpcsvc_request_t   *req,
 
         gf_log ("glusterd", GF_LOG_INFO,
                 "Responded to stage, ret: %d", ret);
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
 
         return ret;
 }
@@ -1441,9 +1428,8 @@ glusterd_op_commit_send_resp (rpcsvc_request_t *req,
                 rsp.op_errstr = "";
 
         if (rsp_dict) {
-                ret = dict_allocate_and_serialize (rsp_dict,
-                                                   &rsp.dict.dict_val,
-                                                   (size_t *)&rsp.dict.dict_len);
+                ret = dict_allocate_and_serialize (rsp_dict, &rsp.dict.dict_val,
+                                                   &rsp.dict.dict_len);
                 if (ret < 0) {
                         gf_log ("", GF_LOG_DEBUG,
                                 "failed to get serialized length of dict");
@@ -1459,8 +1445,7 @@ glusterd_op_commit_send_resp (rpcsvc_request_t *req,
                 "Responded to commit, ret: %d", ret);
 
 out:
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
         return ret;
 }
 
@@ -1491,8 +1476,7 @@ glusterd_handle_incoming_friend_req (rpcsvc_request_t *req)
         }
 
 out:
-        if (friend_req.hostname)
-                free (friend_req.hostname);//malloced by xdr
+        free (friend_req.hostname);//malloced by xdr
 
         if (run_fsm) {
                 glusterd_friend_sm ();
@@ -1529,10 +1513,8 @@ glusterd_handle_incoming_unfriend_req (rpcsvc_request_t *req)
                                             remote_hostname, friend_req.port);
 
 out:
-        if (friend_req.hostname)
-                free (friend_req.hostname);//malloced by xdr
-        if (friend_req.vols.vols_val)
-                free (friend_req.vols.vols_val);//malloced by xdr
+        free (friend_req.hostname);//malloced by xdr
+        free (friend_req.vols.vols_val);//malloced by xdr
 
         glusterd_friend_sm ();
         glusterd_op_sm ();
@@ -1711,8 +1693,7 @@ out:
                         free (friend_req.friends.friends_val);//malloced by xdr
                 dict_unref (dict);
         } else {
-                if (friend_req.friends.friends_val)
-                        free (friend_req.friends.friends_val);//malloced by xdr
+                free (friend_req.friends.friends_val);//malloced by xdr
         }
 
         glusterd_friend_sm ();
@@ -1804,8 +1785,7 @@ respond:
                 rsp.op_ret, rsp.op_errno, ret);
 
 out:
-        if (probe_req.hostname)
-                free (probe_req.hostname);//malloced by xdr
+        free (probe_req.hostname);//malloced by xdr
 
         glusterd_friend_sm ();
         glusterd_op_sm ();
@@ -1865,8 +1845,7 @@ out:
 
         if (ret && dict)
                 dict_unref (dict);
-        if (cli_req.dict.dict_val)
-                free (cli_req.dict.dict_val);
+        free (cli_req.dict.dict_val);
         if (ret)
                 ret = glusterd_op_send_cli_response (cli_op, ret, 0, req,
                                                      NULL, "operation failed");
@@ -2382,8 +2361,7 @@ glusterd_xfer_friend_add_resp (rpcsvc_request_t *req, char *hostname, int port,
 
         gf_log ("glusterd", GF_LOG_INFO,
                 "Responded to %s (%d), ret: %d", hostname, port, ret);
-        if (rsp.hostname)
-                GF_FREE (rsp.hostname);
+        GF_FREE (rsp.hostname);
         return ret;
 }
 
@@ -2475,7 +2453,7 @@ glusterd_list_friends (rpcsvc_request_t *req, dict_t *dict, int32_t flags)
         }
 
         ret = dict_allocate_and_serialize (friends, &rsp.friends.friends_val,
-                                           (size_t *)&rsp.friends.friends_len);
+                                           &rsp.friends.friends_len);
 
         if (ret)
                 goto out;
@@ -2490,8 +2468,7 @@ out:
 
         ret = glusterd_submit_reply (req, &rsp, NULL, 0, NULL,
                                      (xdrproc_t)xdr_gf1_cli_peer_list_rsp);
-        if (rsp.friends.friends_val)
-                GF_FREE (rsp.friends.friends_val);
+        GF_FREE (rsp.friends.friends_val);
 
         return ret;
 }
@@ -2582,7 +2559,7 @@ respond:
         if (ret)
                 goto out;
         ret = dict_allocate_and_serialize (volumes, &rsp.dict.dict_val,
-                                           (size_t *)&rsp.dict.dict_len);
+                                           &rsp.dict.dict_len);
 
         if (ret)
                 goto out;
@@ -2598,8 +2575,7 @@ out:
         if (volumes)
                 dict_unref (volumes);
 
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
         return ret;
 }
 
@@ -2665,8 +2641,7 @@ out:
         if (ret)
                 ret = glusterd_op_send_cli_response (cli_op, ret, 0, req,
                                                      NULL, "operation failed");
-        if (cli_req.dict.dict_val)
-                free (cli_req.dict.dict_val);
+        free (cli_req.dict.dict_val);
 
         return ret;
 }
@@ -2732,8 +2707,7 @@ out:
         if (ret)
                 ret = glusterd_op_send_cli_response (cli_op, ret, 0, req,
                                                      NULL, "operation failed");
-        if (cli_req.dict.dict_val)
-                free (cli_req.dict.dict_val);
+        free (cli_req.dict.dict_val);
 
         return ret;
 }

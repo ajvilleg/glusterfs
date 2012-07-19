@@ -222,8 +222,7 @@ mdc_local_wipe (xlator_t *this, mdc_local_t *local)
         if (local->fd)
                 fd_unref (local->fd);
 
-        if (local->linkname)
-                GF_FREE (local->linkname);
+        GF_FREE (local->linkname);
 
         if (local->xattr)
                 dict_unref (local->xattr);
@@ -249,8 +248,7 @@ mdc_inode_wipe (xlator_t *this, inode_t *inode)
         if (mdc->xattr)
                 dict_unref (mdc->xattr);
 
-        if (mdc->linkname)
-                GF_FREE (mdc->linkname);
+        GF_FREE (mdc->linkname);
 
         GF_FREE (mdc);
 
@@ -378,7 +376,8 @@ mdc_to_iatt (struct md_cache *mdc, struct iatt *iatt)
 
 
 int
-mdc_inode_iatt_set (xlator_t *this, inode_t *inode, struct iatt *iatt)
+mdc_inode_iatt_set_validate(xlator_t *this, inode_t *inode, struct iatt *prebuf,
+			    struct iatt *iatt)
 {
         int              ret = -1;
         struct md_cache *mdc = NULL;
@@ -394,6 +393,19 @@ mdc_inode_iatt_set (xlator_t *this, inode_t *inode, struct iatt *iatt)
                         goto unlock;
                 }
 
+		/*
+		 * Invalidate the inode if the mtime or ctime has changed
+		 * and the prebuf doesn't match the value we have cached.
+		 * TODO: writev returns with a NULL iatt due to
+		 * performance/write-behind, causing invalidation on writes.
+		 */
+		if (IA_ISREG(inode->ia_type) &&
+		    ((iatt->ia_mtime != mdc->md_mtime) ||
+		    (iatt->ia_ctime != mdc->md_ctime)))
+			if (!prebuf || (prebuf->ia_ctime != mdc->md_ctime) ||
+			    (prebuf->ia_mtime != mdc->md_mtime))
+				inode_invalidate(inode);
+
                 mdc_from_iatt (mdc, iatt);
 
                 time (&mdc->ia_time);
@@ -405,6 +417,10 @@ out:
         return ret;
 }
 
+int mdc_inode_iatt_set(xlator_t *this, inode_t *inode, struct iatt *iatt)
+{
+	return mdc_inode_iatt_set_validate(this, inode, NULL, iatt);
+}
 
 int
 mdc_inode_iatt_get (xlator_t *this, inode_t *inode, struct iatt *iatt)
@@ -859,7 +875,7 @@ mdc_truncate_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (!local)
                 goto out;
 
-        mdc_inode_iatt_set (this, local->loc.inode, postbuf);
+        mdc_inode_iatt_set_validate(this, local->loc.inode, prebuf, postbuf);
 
 out:
         MDC_STACK_UNWIND (truncate, frame, op_ret, op_errno, prebuf, postbuf,
@@ -901,7 +917,7 @@ mdc_ftruncate_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (!local)
                 goto out;
 
-        mdc_inode_iatt_set (this, local->fd->inode, postbuf);
+        mdc_inode_iatt_set_validate(this, local->fd->inode, prebuf, postbuf);
 
 out:
         MDC_STACK_UNWIND (ftruncate, frame, op_ret, op_errno, prebuf, postbuf,
@@ -1377,7 +1393,7 @@ mdc_writev_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (!local)
                 goto out;
 
-        mdc_inode_iatt_set (this, local->fd->inode, postbuf);
+        mdc_inode_iatt_set_validate(this, local->fd->inode, prebuf, postbuf);
 
 out:
         MDC_STACK_UNWIND (writev, frame, op_ret, op_errno, prebuf, postbuf,
@@ -1422,7 +1438,7 @@ mdc_setattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (!local)
                 goto out;
 
-        mdc_inode_iatt_set (this, local->loc.inode, postbuf);
+	mdc_inode_iatt_set_validate(this, local->loc.inode, prebuf, postbuf);
 
 out:
         MDC_STACK_UNWIND (setattr, frame, op_ret, op_errno, prebuf, postbuf,
@@ -1464,7 +1480,7 @@ mdc_fsetattr_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (!local)
                 goto out;
 
-        mdc_inode_iatt_set (this, local->fd->inode, postbuf);
+        mdc_inode_iatt_set_validate(this, local->fd->inode, prebuf, postbuf);
 
 out:
         MDC_STACK_UNWIND (fsetattr, frame, op_ret, op_errno, prebuf, postbuf,
@@ -1506,7 +1522,7 @@ mdc_fsync_cbk (call_frame_t *frame, void *cookie, xlator_t *this,
         if (!local)
                 goto out;
 
-        mdc_inode_iatt_set (this, local->fd->inode, postbuf);
+        mdc_inode_iatt_set_validate(this, local->fd->inode, prebuf, postbuf);
 
 out:
         MDC_STACK_UNWIND (fsync, frame, op_ret, op_errno, prebuf, postbuf,

@@ -40,7 +40,7 @@ gf_compare_client_version (rpcsvc_request_t *req, int fop_prognum,
 {
         int ret = -1;
         /* TODO: think.. */
-        if (glusterfs3_1_fop_prog.prognum == fop_prognum)
+        if (glusterfs3_3_fop_prog.prognum == fop_prognum)
                 ret = 0;
 
         return ret;
@@ -669,19 +669,15 @@ fail:
                              (xdrproc_t)xdr_gf_setvolume_rsp);
 
 
-        if (args.dict.dict_val)
-                free (args.dict.dict_val);
+        free (args.dict.dict_val);
 
-        if (rsp.dict.dict_val)
-                GF_FREE (rsp.dict.dict_val);
+        GF_FREE (rsp.dict.dict_val);
 
         dict_unref (params);
         dict_unref (reply);
         dict_unref (config_params);
 
-        if (buf) {
-                GF_FREE (buf);
-        }
+        GF_FREE (buf);
 
         return 0;
 }
@@ -737,9 +733,7 @@ fail:
         server_submit_reply (NULL, req, &rsp, NULL, 0, NULL,
                              (xdrproc_t)xdr_gf_set_lk_ver_rsp);
 
-        if (args.uid != NULL) {
-                free (args.uid);
-        }
+        free (args.uid);
 
         return 0;
 }

@@ -66,8 +66,8 @@ _is_lock_fop (struct saved_frame *sframe)
 {
         int     fop     = 0;
 
-        if (SFRAME_GET_PROGNUM (sframe) == GLUSTER3_1_FOP_PROGRAM &&
-            SFRAME_GET_PROGVER (sframe) == GLUSTER3_1_FOP_VERSION)
+        if (SFRAME_GET_PROGNUM (sframe) == GLUSTER_FOP_PROGRAM &&
+            SFRAME_GET_PROGVER (sframe) == GLUSTER_FOP_VERSION)
                 fop = SFRAME_GET_PROCNUM (sframe);
 
         return ((fop == GFS3_OP_LK) ||
@@ -737,7 +737,8 @@ rpc_clnt_handle_cbk (struct rpc_clnt *clnt, rpc_transport_pollin_t *msg)
 
         if (found && (procnum < program->numactors) &&
             (program->actors[procnum].actor)) {
-                program->actors[procnum].actor (&progmsg);
+                program->actors[procnum].actor (clnt, program->mydata,
+                                                &progmsg);
         }
 
 out:
@@ -1321,7 +1322,7 @@ out:
 
 int
 rpcclnt_cbk_program_register (struct rpc_clnt *clnt,
-                              rpcclnt_cb_program_t *program)
+                              rpcclnt_cb_program_t *program, void *mydata)
 {
         int                   ret                = -1;
         char                  already_registered = 0;
@@ -1360,6 +1361,8 @@ rpcclnt_cbk_program_register (struct rpc_clnt *clnt,
 
         memcpy (tmp, program, sizeof (*tmp));
         INIT_LIST_HEAD (&tmp->program);
+
+        tmp->mydata = mydata;
 
         pthread_mutex_lock (&clnt->lock);
         {
@@ -1718,8 +1721,7 @@ rpc_clnt_transport_unix_options_build (dict_t **options, char *filepath)
         *options = dict;
 out:
         if (ret) {
-                if (fpath)
-                        GF_FREE (fpath);
+                GF_FREE (fpath);
                 if (dict)
                         dict_unref (dict);
         }
