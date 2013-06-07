@@ -111,6 +111,11 @@ def clear_one_xattr (abs_path, xbrick):
 			xattr.set(abs_path,xname,value)
 
 def clear_xattrs (rel_path):
+	if options.verbose:
+		abs_path = "%s/%s" % (parent_vol.path, rel_path)
+		print "Clearing xattrs on %s" % abs_path
+		if options.dry_run:
+			return
 	for fbrick in bricks:
 		abs_path = "%s/%s" % (fbrick.path, rel_path)
 		for xbrick in bricks:
@@ -118,6 +123,11 @@ def clear_xattrs (rel_path):
 
 def remove_dups (rel_path, source):
 	src_path = "%s/%s" % (source.path, rel_path)
+	if options.verbose:
+		abs_path = "%s/%s" % (parent_vol.path, rel_path)
+		print "Removing dups for %s (source=%s)" % (abs_path, src_path)
+		if options.dry_run:
+			return
 	for b in bricks:
 		if (not b.present) or (b == source):
 			continue
@@ -130,6 +140,11 @@ def remove_dups (rel_path, source):
 			print "Could not unlink %s" % abs_path
 
 def fix_gfid (rel_path):
+	if options.verbose:
+		abs_path = "%s/%s" % (parent_vol.path, rel_path)
+		print "Fixing GFID on %s" % abs_path
+		if options.dry_run:
+			return
 	abs_path = "%s/%s" % (bricks[0].path, rel_path)
 	gfid = xattr.get(abs_path,"busted.gfid")
 	if gfid == -1:
@@ -300,14 +315,16 @@ def heal_file (rel_path):
 		print "Can't heal %s (no pristine source)" % rel_path
 		return "heal failed"
 
-def touch_file (p, mode):
-        abs_path = "%s/%s" % (parent_vol.path, p)
-        if options.verbose:
-                print "Touching %s (%s)" % (abs_path, mode)
-        try:
-                os.stat(abs_path)
-        except OSError:
-                print "Touching %s failed?!?" % abs_path
+def touch_file (p):
+		abs_path = "%s/%s" % (parent_vol.path, p)
+		if options.verbose:
+			print "Touching %s" % abs_path
+			if options.dry_run:
+					return
+		try:
+				os.stat(abs_path)
+		except OSError:
+				print "Touching %s failed?!?" % abs_path
 
 if __name__ == "__main__":
 
@@ -316,6 +333,12 @@ if __name__ == "__main__":
 	parser.add_option("-a", "--aggressive", dest="aggressive",
 					  default=False, action="store_true",
 					  help="heal even for certain split-brain scenarios")
+	parser.add_option("-d", "--dry-run", dest="dry_run",
+					  default=False, action="store_true",
+					  help="dry run, print actions but do not execute")
+	parser.add_option("-f", "--file", dest="volfile",
+					  default=None, action="store",
+					  help="use volfile instead of fetching from server")
 	parser.add_option("-g", "--gfid-mismatch", dest="gfid_mismatch",
 					  default=False, action="store_true",
 					  help="check for and (if aggressive) fix GFID mismatches")
@@ -326,6 +349,8 @@ if __name__ == "__main__":
 					  default=False, action="store_true",
 					  help="verbose output")
 	options, args = parser.parse_args()
+	if options.dry_run:
+		options.verbose = True
 
 	try:
 		volume = args[0]
@@ -359,11 +384,17 @@ if __name__ == "__main__":
 	atexit.register(cleanup_workdir)
 	os.chdir(work_dir)
 
-	volfile_pipe = get_bricks(options.host,volume)
+	if options.volfile:
+		volfile_pipe = open(options.volfile,"r")
+	else:
+		volfile_pipe = get_bricks(options.host,volume)
 	all_xlators, last_xlator = volfilter.load(volfile_pipe)
 	for client_vol in all_xlators.itervalues():
 		if client_vol.type != "protocol/client":
 			continue
+		print "found brick %s:%s" % (
+			client_vol.opts["remote-host"],
+			client_vol.opts["remote-subvolume"])
 		if client_vol.opts["remote-host"] == brick_host:
 			if client_vol.opts["remote-subvolume"] == brick_path:
 				break
@@ -400,24 +431,26 @@ if __name__ == "__main__":
 
 	if options.verbose:
 		print "Mounting parent volume..."
-        lpath = "%s/parent" % work_dir
-        mount_brick(lpath,all_xlators,afr_vol)
-        parent_vol = Brick(lpath,afr_vol.name,"<parent>")
+	lpath = "%s/parent" % work_dir
+	mount_brick(lpath,all_xlators,afr_vol)
+	parent_vol = Brick(lpath,afr_vol.name,"<parent>")
 
 	# Do the real work.
 	for p in paths:
 		result = heal_file(p)
+		if result == "not needed":
+			continue
 		if result == "healed":
-			touch_file(p,"normal")
-		if result in ("not needed", "healed", "unsafe"):
+			touch_file(p)
+			continue
+		if not options.aggressive:
 			continue
 		if not all_are_same(p):
 			print "Copies of %s diverge" % p
 			continue
 		if result == "gfid mismatch":
-			if not options.aggressive:
-				continue
 			fix_gfid(p)
+		remove_dups(p,bricks[0])
 		clear_xattrs(p)
-		touch_file(p,"aggressive")
+		touch_file(p)
 
